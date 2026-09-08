@@ -20,11 +20,44 @@ import (
 	"github.com/blkmlo/tulipe/internal/translate"
 )
 
-// Provider identifiers.
+// Provider identifiers. A provider is a preset from llm.Presets; these two are
+// named because the rest of the code branches on them.
 const (
-	ProviderAnthropic = "anthropic"
-	ProviderOpenAI    = "openai-compatible"
+	ProviderAnthropic = llm.KindAnthropic
+	ProviderOpenAI    = llm.KindOpenAI
 )
+
+// Format is how the translated book is written out.
+const (
+	FormatEPUB = "epub"
+	FormatText = "txt"
+)
+
+// Formats are the accepted output formats.
+var Formats = []string{FormatEPUB, FormatText}
+
+// Preset returns the catalogue entry for the configured provider.
+func (c Config) Preset() (llm.Preset, bool) { return llm.LookupPreset(c.Provider) }
+
+// Kind is the protocol the configured provider speaks.
+func (c Config) Kind() string {
+	if p, ok := c.Preset(); ok {
+		return p.Kind
+	}
+	return ""
+}
+
+// Endpoint is the base URL actually used: the one configured, or the preset's
+// when none was set.
+func (c Config) Endpoint() string {
+	if strings.TrimSpace(c.BaseURL) != "" {
+		return strings.TrimSpace(c.BaseURL)
+	}
+	if p, ok := c.Preset(); ok {
+		return p.BaseURL
+	}
+	return ""
+}
 
 // Config is everything Tulipe remembers between runs.
 type Config struct {
@@ -39,6 +72,7 @@ type Config struct {
 	TargetLanguage string `json:"target_language"`
 	TargetCode     string `json:"target_code"`
 	SourceLanguage string `json:"source_language,omitempty"`
+	SourceCode     string `json:"source_code,omitempty"`
 	Glossary       string `json:"glossary,omitempty"`
 	StyleNotes     string `json:"style_notes,omitempty"`
 
@@ -51,7 +85,9 @@ type Config struct {
 	TimeoutSeconds int `json:"timeout_seconds"`
 
 	OutputDir string `json:"output_dir,omitempty"`
-	Resume    bool   `json:"resume"`
+	// Format is "epub" or "txt".
+	Format string `json:"format"`
+	Resume bool   `json:"resume"`
 }
 
 // Default is the configuration a first run starts from.
@@ -69,6 +105,7 @@ func Default() Config {
 		Attempts:         4,
 		ContextChars:     400,
 		TimeoutSeconds:   300,
+		Format:           FormatEPUB,
 		Resume:           true,
 	}
 }
@@ -144,6 +181,9 @@ func (c Config) normalise() Config {
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = d.TimeoutSeconds
 	}
+	if c.Format == "" {
+		c.Format = FormatEPUB
+	}
 	return c
 }
 
@@ -151,30 +191,36 @@ func (c Config) normalise() Config {
 // falling back to a default would leave the user believing a setting took
 // effect when it did not.
 func (c Config) Validate() error {
-	switch c.Provider {
-	case ProviderAnthropic, ProviderOpenAI:
-	default:
-		return fmt.Errorf("fournisseur inconnu %q ; attendu %q ou %q", c.Provider, ProviderAnthropic, ProviderOpenAI)
+	preset, known := c.Preset()
+	if !known {
+		return fmt.Errorf("fournisseur inconnu %q ; connus : %s", c.Provider, strings.Join(llm.PresetIDs(), ", "))
 	}
-	if strings.TrimSpace(c.Model) == "" {
+	if preset.Kind != llm.KindDeepL && strings.TrimSpace(c.Model) == "" {
 		return errors.New("aucun modèle indiqué")
 	}
 	if strings.TrimSpace(c.TargetLanguage) == "" {
 		return errors.New("aucune langue cible indiquée")
 	}
-	if c.Provider == ProviderOpenAI && strings.TrimSpace(c.BaseURL) == "" {
+	endpoint := c.Endpoint()
+	if preset.Kind == llm.KindOpenAI && strings.TrimSpace(endpoint) == "" {
 		return errors.New("un service compatible OpenAI exige une URL de base (par exemple http://localhost:11434/v1)")
 	}
-	if c.BaseURL != "" {
-		u, err := url.Parse(c.BaseURL)
+	if strings.Contains(endpoint, "{") {
+		return fmt.Errorf("l'URL de base contient encore un champ à compléter : %s", endpoint)
+	}
+	if preset.Kind == llm.KindDeepL && strings.TrimSpace(c.TargetCode) == "" {
+		return errors.New("DeepL exige un code de langue cible ; renseignez « Code de langue »")
+	}
+	if endpoint != "" {
+		u, err := url.Parse(endpoint)
 		if err != nil || u.Scheme == "" || u.Host == "" {
-			return fmt.Errorf("URL de base invalide %q ; attendu une adresse complète comme http://localhost:11434/v1", c.BaseURL)
+			return fmt.Errorf("URL de base invalide %q ; attendu une adresse complète comme http://localhost:11434/v1", endpoint)
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
 			return fmt.Errorf("URL de base en %q ; seuls http et https sont acceptés", u.Scheme)
 		}
 	}
-	if c.Effort != "" && c.Provider == ProviderAnthropic && !slices.Contains(Efforts, c.Effort) {
+	if c.Effort != "" && preset.Kind == llm.KindAnthropic && !slices.Contains(Efforts, c.Effort) {
 		return fmt.Errorf("effort inconnu %q ; attendu %s", c.Effort, strings.Join(Efforts, ", "))
 	}
 	for _, f := range []struct {
@@ -192,6 +238,9 @@ func (c Config) Validate() error {
 		if f.v < f.min {
 			return fmt.Errorf("%s vaut %d ; le minimum est %d", f.name, f.v, f.min)
 		}
+	}
+	if !slices.Contains(Formats, c.Format) {
+		return fmt.Errorf("format de sortie inconnu %q ; attendu %s", c.Format, strings.Join(Formats, " ou "))
 	}
 	if c.OutputDir != "" {
 		info, err := os.Stat(c.OutputDir)
@@ -211,14 +260,11 @@ func (c Config) ResolveAPIKey() (key, source string) {
 	if v := os.Getenv("TULIPE_API_KEY"); v != "" {
 		return v, "TULIPE_API_KEY"
 	}
-	switch c.Provider {
-	case ProviderAnthropic:
-		if v := os.Getenv("ANTHROPIC_API_KEY"); v != "" {
-			return v, "ANTHROPIC_API_KEY"
-		}
-	default:
-		if v := os.Getenv("OPENAI_API_KEY"); v != "" {
-			return v, "OPENAI_API_KEY"
+	if preset, ok := c.Preset(); ok {
+		for _, name := range preset.KeyEnv {
+			if v := os.Getenv(name); v != "" {
+				return v, name
+			}
 		}
 	}
 	if c.APIKey != "" {
@@ -231,23 +277,34 @@ func (c Config) ResolveAPIKey() (key, source string) {
 // without ever revealing the key itself.
 func (c Config) KeyStatus() string {
 	key, source := c.ResolveAPIKey()
-	switch {
-	case key != "":
+	if key != "" {
 		return "définie (" + source + ")"
-	case c.Provider == ProviderAnthropic:
+	}
+	preset, ok := c.Preset()
+	switch {
+	case ok && preset.Kind == llm.KindAnthropic:
 		// The SDK also accepts a profile created by `ant auth login`, so an
 		// empty key is not necessarily a problem.
 		return "absente ici — le SDK Anthropic cherchera ses propres identifiants"
+	case ok && preset.NoKey:
+		return "inutile pour ce service"
+	case ok && len(preset.KeyEnv) > 0:
+		return "absente — attendue dans " + strings.Join(preset.KeyEnv, " ou ")
 	default:
-		return "absente (beaucoup de services locaux n'en demandent pas)"
+		return "absente"
 	}
 }
 
 // NewProvider builds the translation backend described by the configuration.
 func (c Config) NewProvider() (llm.Provider, error) {
 	key, _ := c.ResolveAPIKey()
-	switch c.Provider {
-	case ProviderAnthropic:
+	preset, ok := c.Preset()
+	if !ok {
+		return nil, fmt.Errorf("fournisseur inconnu %q ; connus : %s", c.Provider, strings.Join(llm.PresetIDs(), ", "))
+	}
+	timeout := time.Duration(c.TimeoutSeconds) * time.Second
+	switch preset.Kind {
+	case llm.KindAnthropic:
 		return llm.NewAnthropic(llm.AnthropicOptions{
 			APIKey:     key,
 			BaseURL:    c.BaseURL,
@@ -255,16 +312,23 @@ func (c Config) NewProvider() (llm.Provider, error) {
 			Effort:     c.Effort,
 			Structured: c.StructuredOutput,
 		}), nil
-	case ProviderOpenAI:
+	case llm.KindOpenAI:
 		return llm.NewOpenAICompat(llm.OpenAICompatOptions{
-			BaseURL:     c.BaseURL,
+			BaseURL:     c.Endpoint(),
 			APIKey:      key,
 			Model:       c.Model,
 			Temperature: c.Temperature,
 			JSONMode:    c.StructuredOutput,
+			Timeout:     timeout,
+		})
+	case llm.KindDeepL:
+		return llm.NewDeepL(llm.DeepLOptions{
+			APIKey:  key,
+			BaseURL: c.BaseURL,
+			Timeout: timeout,
 		})
 	default:
-		return nil, fmt.Errorf("fournisseur inconnu %q ; attendu %q ou %q", c.Provider, ProviderAnthropic, ProviderOpenAI)
+		return nil, fmt.Errorf("protocole inconnu %q pour le fournisseur %q", preset.Kind, c.Provider)
 	}
 }
 
@@ -273,7 +337,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 // a model never reuses work done under the previous settings.
 func (c Config) Recipe() translate.Recipe {
 	effort := c.Effort
-	if c.Provider != ProviderAnthropic {
+	if c.Kind() != llm.KindAnthropic {
 		// Effort is meaningless for the other backend; including it would
 		// invalidate caches for no reason.
 		effort = ""
@@ -285,6 +349,7 @@ func (c Config) Recipe() translate.Recipe {
 		TargetLanguage: c.TargetLanguage,
 		TargetCode:     c.TargetCode,
 		SourceLanguage: c.SourceLanguage,
+		SourceCode:     c.SourceCode,
 		Glossary:       c.Glossary,
 		StyleNotes:     c.StyleNotes,
 	}

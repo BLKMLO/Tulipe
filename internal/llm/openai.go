@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -193,4 +195,70 @@ func rejectsResponseFormat(err error) bool {
 	msg := strings.ToLower(api.Message)
 	return strings.Contains(msg, "response_format") || strings.Contains(msg, "json_object") ||
 		strings.Contains(msg, "not supported")
+}
+
+type modelListResponse struct {
+	Data []struct {
+		ID string `json:"id"`
+	} `json:"data"`
+	// Some services answer with a bare array of names instead of the documented
+	// object; Models is where that lands.
+	Models []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"models"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+// ListModels implements ModelLister by asking the service what it serves.
+// Reading the list from the source beats shipping one that goes stale.
+func (p *OpenAICompat) ListModels(ctx context.Context) ([]string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p.baseURL+"/models", nil)
+	if err != nil {
+		return nil, err
+	}
+	if p.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+p.apiKey)
+	}
+	resp, err := p.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
+	if err != nil {
+		return nil, err
+	}
+
+	var parsed modelListResponse
+	_ = json.Unmarshal(raw, &parsed)
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		e := &APIError{Provider: p.ID(), Status: resp.StatusCode, Message: summarise(string(raw))}
+		if parsed.Error != nil && parsed.Error.Message != "" {
+			e.Message = summarise(parsed.Error.Message)
+		}
+		return nil, e
+	}
+
+	var out []string
+	for _, m := range parsed.Data {
+		if m.ID != "" {
+			out = append(out, m.ID)
+		}
+	}
+	for _, m := range parsed.Models {
+		switch {
+		case m.ID != "":
+			out = append(out, m.ID)
+		case m.Name != "":
+			out = append(out, m.Name)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("le service n'a listé aucun modèle : %s", summarise(string(raw)))
+	}
+	sort.Strings(out)
+	return slices.Compact(out), nil
 }

@@ -191,14 +191,15 @@ func TestRecipeKeyChangesWithEverySemanticSetting(t *testing.T) {
 
 	variants := map[string]Recipe{}
 	for name, mutate := range map[string]func(*Recipe){
-		"provider": func(r *Recipe) { r.Provider = "openai-compatible" },
-		"model":    func(r *Recipe) { r.Model = "autre" },
-		"effort":   func(r *Recipe) { r.Effort = "max" },
-		"langue":   func(r *Recipe) { r.TargetLanguage = "español" },
-		"code":     func(r *Recipe) { r.TargetCode = "es" },
-		"source":   func(r *Recipe) { r.SourceLanguage = "deutsch" },
-		"glossary": func(r *Recipe) { r.Glossary = "a = c" },
-		"style":    func(r *Recipe) { r.StyleNotes = "familier" },
+		"provider":    func(r *Recipe) { r.Provider = "openai-compatible" },
+		"model":       func(r *Recipe) { r.Model = "autre" },
+		"effort":      func(r *Recipe) { r.Effort = "max" },
+		"langue":      func(r *Recipe) { r.TargetLanguage = "español" },
+		"code":        func(r *Recipe) { r.TargetCode = "es" },
+		"source":      func(r *Recipe) { r.SourceLanguage = "deutsch" },
+		"code source": func(r *Recipe) { r.SourceCode = "de" },
+		"glossary":    func(r *Recipe) { r.Glossary = "a = c" },
+		"style":       func(r *Recipe) { r.StyleNotes = "familier" },
 	} {
 		r := base
 		mutate(&r)

@@ -440,3 +440,108 @@ func TestRequestTimeoutIsRetryableAndNamed(t *testing.T) {
 		t.Errorf("Attempted = %d; a timed-out call must be retried, not abandoned", res.Attempted)
 	}
 }
+
+// fakeDirect stands in for a translation service such as DeepL: it is handed
+// the segments themselves, so there is no prompt and no JSON in the way.
+type fakeDirect struct {
+	calls    int
+	requests []llm.SegmentRequest
+	answer   func(call int, req llm.SegmentRequest) ([]string, error)
+}
+
+func (f *fakeDirect) ID() string    { return "fake-direct" }
+func (f *fakeDirect) Model() string { return "fake-direct" }
+
+func (f *fakeDirect) Complete(context.Context, llm.Request) (*llm.Response, error) {
+	return nil, errors.New("ce service ne suit pas d'instructions")
+}
+
+func (f *fakeDirect) TranslateSegments(_ context.Context, req llm.SegmentRequest) (*llm.SegmentResponse, error) {
+	f.calls++
+	f.requests = append(f.requests, req)
+	out, err := f.answer(f.calls, req)
+	if err != nil {
+		return nil, err
+	}
+	return &llm.SegmentResponse{Translations: out, Model: "fake-direct"}, nil
+}
+
+func TestDirectTranslatorPathSkipsPrompting(t *testing.T) {
+	p := &fakeDirect{answer: func(_ int, req llm.SegmentRequest) ([]string, error) {
+		return upper(req.Segments), nil
+	}}
+	opts := Options{TargetLanguage: "français", TargetCode: "fr", SourceCode: "en", Attempts: 1}
+	res, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Translated != 4 {
+		t.Errorf("translated %d segments, want 4", res.Translated)
+	}
+	if p.calls == 0 {
+		t.Fatal("the direct path was not used")
+	}
+	req := p.requests[0]
+	if req.TargetCode != "fr" || req.SourceCode != "en" {
+		t.Errorf("language codes = %q/%q, want fr/en", req.TargetCode, req.SourceCode)
+	}
+	if !req.Markup {
+		t.Error("a batch holding block segments must be flagged as carrying markup")
+	}
+	if !strings.Contains(string(res.Output), "<EM>THREE</EM>") {
+		t.Errorf("the translation was not spliced back:\n%s", res.Output)
+	}
+	// Usage stays unreported: this backend sends none.
+	if res.Usage.Reported {
+		t.Error("usage must not be invented for a backend that reports none")
+	}
+}
+
+func TestDirectTranslatorCountMismatchStillSplits(t *testing.T) {
+	p := &fakeDirect{answer: func(_ int, req llm.SegmentRequest) ([]string, error) {
+		if len(req.Segments) > 1 {
+			return upper(req.Segments)[:len(req.Segments)-1], nil
+		}
+		return upper(req.Segments), nil
+	}}
+	opts := Options{TargetLanguage: "fr", TargetCode: "fr", Attempts: 1, StopAfterFailures: 6}
+	res, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Translated != 4 {
+		t.Errorf("translated %d segments, want the split to rescue all 4", res.Translated)
+	}
+}
+
+func TestDirectTranslatorFailureIsGuarded(t *testing.T) {
+	p := &fakeDirect{answer: func(_ int, _ llm.SegmentRequest) ([]string, error) {
+		return nil, &llm.APIError{Provider: "fake-direct", Status: 403, Message: "quota épuisé"}
+	}}
+	opts := Options{TargetLanguage: "fr", TargetCode: "fr", Attempts: 3, StopAfterFailures: 6}
+	_, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if !errors.Is(err, ErrServiceUnusable) {
+		t.Fatalf("Document = %v, want ErrServiceUnusable", err)
+	}
+	if p.calls != 1 {
+		t.Errorf("the backend was called %d times; an exhausted quota must stop at once", p.calls)
+	}
+}
+
+func TestDirectTranslatorFlagsPlainTextBatches(t *testing.T) {
+	// A document whose only translatable spans are bare text must not ask for
+	// markup handling.
+	plain := `<html><head><title>titre</title></head><body><div>du texte</div></body></html>`
+	p := &fakeDirect{answer: func(_ int, req llm.SegmentRequest) ([]string, error) {
+		return upper(req.Segments), nil
+	}}
+	opts := Options{TargetLanguage: "fr", TargetCode: "fr", Attempts: 1}
+	if _, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(plain), "", nil); err != nil {
+		t.Fatal(err)
+	}
+	for i, req := range p.requests {
+		if req.Markup {
+			t.Errorf("request %d asked for markup handling on plain text", i)
+		}
+	}
+}

@@ -5,6 +5,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/blkmlo/tulipe/internal/llm"
 )
 
 func TestValidateRejectsWhatItCannotDo(t *testing.T) {
@@ -13,7 +15,10 @@ func TestValidateRejectsWhatItCannotDo(t *testing.T) {
 		tweak func(*Config)
 		want  string
 	}{
-		{"fournisseur inconnu", func(c *Config) { c.Provider = "mistral" }, "fournisseur inconnu"},
+		{"fournisseur inconnu", func(c *Config) { c.Provider = "telepathie" }, "fournisseur inconnu"},
+		{"format inconnu", func(c *Config) { c.Format = "pdf" }, "format de sortie inconnu"},
+		{"url à compléter", func(c *Config) { c.Provider = "cloudflare" }, "à compléter"},
+		{"deepl sans code", func(c *Config) { c.Provider = "deepl"; c.TargetCode = "" }, "code de langue cible"},
 		{"modèle vide", func(c *Config) { c.Model = "  " }, "aucun modèle"},
 		{"langue vide", func(c *Config) { c.TargetLanguage = "" }, "aucune langue"},
 		{"effort inventé", func(c *Config) { c.Effort = "enorme" }, "effort inconnu"},
@@ -160,5 +165,99 @@ func TestLoadFillsMissingFields(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("the completed configuration must be valid: %v", err)
+	}
+}
+
+func TestEveryPresetIsUsableOutOfTheBox(t *testing.T) {
+	t.Setenv("TULIPE_API_KEY", "")
+	for _, p := range llm.Presets() {
+		cfg := Default()
+		cfg.Provider = p.ID
+		cfg.Model = "un-modele"
+		err := cfg.Validate()
+
+		switch {
+		case p.NeedsBaseURL() && p.Kind == llm.KindOpenAI:
+			// These two ask the user for the endpoint, and must say so.
+			if err == nil {
+				t.Errorf("%s: Validate() = nil, want a complaint about the base URL", p.ID)
+			}
+		default:
+			if err != nil {
+				t.Errorf("%s: Validate() = %v, want nil", p.ID, err)
+			}
+		}
+		if cfg.Kind() != p.Kind {
+			t.Errorf("%s: Kind() = %q, want %q", p.ID, cfg.Kind(), p.Kind)
+		}
+	}
+}
+
+func TestPresetSuppliesTheEndpointAndKeyVariable(t *testing.T) {
+	t.Setenv("TULIPE_API_KEY", "")
+	t.Setenv("GROQ_API_KEY", "clef-groq")
+
+	cfg := Default()
+	cfg.Provider = "groq"
+	cfg.Model = "un-modele"
+	if got := cfg.Endpoint(); got == "" || !strings.HasPrefix(got, "https://") {
+		t.Errorf("Endpoint() = %q, want the preset's URL", got)
+	}
+	key, source := cfg.ResolveAPIKey()
+	if key != "clef-groq" || source != "GROQ_API_KEY" {
+		t.Errorf("ResolveAPIKey = %q from %q, want the preset's variable", key, source)
+	}
+	if status := cfg.KeyStatus(); strings.Contains(status, "clef-groq") {
+		t.Errorf("KeyStatus leaks the key: %q", status)
+	}
+
+	// A hand-set URL overrides the preset's.
+	cfg.BaseURL = "http://localhost:9999/v1"
+	if cfg.Endpoint() != "http://localhost:9999/v1" {
+		t.Errorf("Endpoint() = %q, want the configured URL to win", cfg.Endpoint())
+	}
+}
+
+func TestKeyStatusNamesTheExpectedVariable(t *testing.T) {
+	t.Setenv("TULIPE_API_KEY", "")
+	t.Setenv("MISTRAL_API_KEY", "")
+	cfg := Default()
+	cfg.Provider = "mistral"
+	if status := cfg.KeyStatus(); !strings.Contains(status, "MISTRAL_API_KEY") {
+		t.Errorf("KeyStatus = %q, want it to name the variable to set", status)
+	}
+	cfg.Provider = "ollama"
+	if status := cfg.KeyStatus(); !strings.Contains(status, "inutile") {
+		t.Errorf("KeyStatus = %q, want it to say no key is needed locally", status)
+	}
+}
+
+func TestNewProviderBuildsEachKind(t *testing.T) {
+	t.Setenv("TULIPE_API_KEY", "une-clef")
+	for _, id := range []string{"anthropic", "groq", "deepl", "ollama"} {
+		cfg := Default()
+		cfg.Provider = id
+		cfg.Model = "un-modele"
+		p, err := cfg.NewProvider()
+		if err != nil {
+			t.Errorf("%s: NewProvider = %v", id, err)
+			continue
+		}
+		if p.ID() == "" {
+			t.Errorf("%s: the provider reports no identifier", id)
+		}
+	}
+}
+
+func TestDeepLIsRecognisedAsADirectTranslator(t *testing.T) {
+	t.Setenv("TULIPE_API_KEY", "une-clef:fx")
+	cfg := Default()
+	cfg.Provider = "deepl"
+	p, err := cfg.NewProvider()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := p.(llm.DirectTranslator); !ok {
+		t.Error("DeepL must be reached through the direct-translation path, not through prompting")
 	}
 }

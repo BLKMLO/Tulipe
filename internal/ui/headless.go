@@ -83,7 +83,7 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 		return err
 	}
 
-	final, err := writeBook(book, output)
+	final, err := writeBook(book, output, cfg.Format)
 	if err != nil {
 		return err
 	}

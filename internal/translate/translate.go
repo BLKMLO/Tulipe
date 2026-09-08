@@ -28,6 +28,9 @@ type Options struct {
 	TargetCode string
 	// SourceLanguage is optional; empty lets the model detect it.
 	SourceLanguage string
+	// SourceCode is the BCP 47 tag of the source language, used by backends
+	// that take codes rather than prose. Empty asks for detection.
+	SourceCode string
 	// Glossary pins terminology, one "source = target" rule per line.
 	Glossary string
 	// StyleNotes are free-form instructions appended to the system prompt.
@@ -356,6 +359,72 @@ func (t *translator) request(lo, hi int) ([]string, error) {
 	for _, s := range t.segs[lo:hi] {
 		sources = append(sources, s.Source)
 	}
+	splittable := hi-lo > 1
+
+	if direct, ok := t.provider.(llm.DirectTranslator); ok {
+		return t.requestDirect(direct, lo, hi, sources, splittable)
+	}
+	return t.requestPrompt(sources, splittable)
+}
+
+// requestDirect uses a backend that translates segments natively. There is no
+// prompt to ignore and no JSON to mangle, so the only answer-level failure left
+// is a wrong number of translations.
+func (t *translator) requestDirect(direct llm.DirectTranslator, lo, hi int, sources []string, splittable bool) ([]string, error) {
+	markup := false
+	for _, s := range t.segs[lo:hi] {
+		if s.Kind == epub.KindBlock {
+			markup = true
+			break
+		}
+	}
+	req := llm.SegmentRequest{
+		Segments:   sources,
+		TargetCode: t.opts.TargetCode,
+		SourceCode: t.opts.SourceCode,
+		Markup:     markup,
+	}
+
+	var out []string
+	var answerErr error
+	err := llm.Retry(t.ctx, t.opts.Attempts, t.opts.RetryBase, func(n llm.RetryNotice) {
+		t.emit("", &n)
+	}, func() error {
+		t.res.Attempted++
+		ctx, cancel := t.requestContext()
+		resp, err := direct.TranslateSegments(ctx, req)
+		cancel()
+		if err != nil {
+			return t.timeoutError(err)
+		}
+		t.res.Usage.Add(resp.Usage)
+		if len(resp.Translations) != len(sources) {
+			// The service answered, so this is not an outage; record it and
+			// stop retrying, the caller will split.
+			answerErr = fmt.Errorf("%d traductions renvoyées pour %d segments",
+				len(resp.Translations), len(sources))
+			return nil
+		}
+		out = resp.Translations
+		return nil
+	})
+	if err != nil {
+		return nil, t.guard(err)
+	}
+	if answerErr != nil {
+		if splittable {
+			return nil, answerErr
+		}
+		return nil, t.guard(answerErr)
+	}
+	t.res.Requests++
+	t.opts.failures.success()
+	t.emit("", nil)
+	return out, nil
+}
+
+// requestPrompt instructs a chat model and reads the JSON it answers with.
+func (t *translator) requestPrompt(sources []string, splittable bool) ([]string, error) {
 	payload, err := json.Marshal(sources)
 	if err != nil {
 		return nil, err
@@ -368,7 +437,6 @@ func (t *translator) request(lo, hi int) ([]string, error) {
 		Schema:    responseSchema,
 	}
 
-	splittable := hi-lo > 1
 	var lastErr error
 	for attempt := 1; attempt <= answerAttempts; attempt++ {
 		resp, err := t.call(req)

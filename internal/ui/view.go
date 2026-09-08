@@ -27,6 +27,8 @@ func (m Model) View() string {
 		body = m.viewSettings()
 	case screenResume:
 		body = m.viewResume()
+	case screenModels:
+		body = m.viewModels()
 	}
 
 	var out strings.Builder

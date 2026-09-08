@@ -10,6 +10,8 @@ pour traiter des livres en lot.
 tulipe                          menu interactif
 tulipe livre.epub               menu, ouvert sur ce livre
 tulipe translate livre.epub     traduction sans interface
+tulipe providers                services connus et clé attendue
+tulipe models                   liste des modèles, demandée au service
 tulipe config                   configuration courante
 ```
 
@@ -68,7 +70,7 @@ n'est jamais perdu silencieusement.
 | Traduction anormalement longue | source conservée, passage signalé |
 | Erreur 429 / 5xx / réseau | nouvelle tentative, attente doublée à chaque essai |
 | Service muet | l'appel est abandonné après `--timeout`, puis réessayé |
-| Clé refusée, droit manquant, modèle inexistant | arrêt immédiat de la traduction |
+| Clé refusée, droit manquant, modèle inexistant, quota DeepL épuisé | arrêt immédiat de la traduction |
 | Six échecs d'affilée | arrêt de la traduction |
 | **Un document dont aucun segment n'a pu être traduit** | **document en échec, il n'est ni remplacé ni mis en cache** |
 
@@ -92,24 +94,65 @@ Quand un document échoue, le fichier est tout de même écrit : le travail
 partiel est conservé, les documents en échec y figurent en langue source, et le
 message final les nomme.
 
-## Modèles
+## Services
 
-Deux fournisseurs :
+`tulipe providers` liste ce que Tulipe sait joindre. Trois protocoles :
 
-- **`anthropic`** — via le SDK Go officiel. Modèle par défaut `claude-opus-5`.
-  Le niveau d'`effort` (`low` → `max`) règle le soin apporté à la traduction et
-  ce qu'elle coûte.
-- **`openai-compatible`** — tout service parlant le protocole
-  `/chat/completions` : Ollama, LM Studio, llama.cpp, ou un agrégateur. Avec un
-  service local, aucune donnée ne quitte la machine.
+| Protocole | Services |
+|---|---|
+| **Anthropic** | Claude, via le SDK officiel (réglage d'effort disponible) |
+| **Compatible OpenAI** | Google AI Studio (Gemini), Mistral, Groq, Cerebras, NVIDIA NIM, Cohere, Cloudflare Workers AI, OpenAI, OpenRouter, Ollama et LM Studio en local, ou n'importe quel service parlant `/chat/completions` |
+| **DeepL** | traducteur dédié, protocole propre |
+
+Choisir un service dans les réglages remplit son URL de base ; une URL saisie à
+la main n'est jamais écrasée. Plusieurs de ces services annoncent une offre
+accessible sans carte bancaire — **les conditions exactes sont sur leur site**,
+Tulipe n'en garde aucune copie : ces limites changent trop souvent pour qu'un
+chiffre inscrit ici soit encore vrai quand vous le lirez.
+
+### Choisir un modèle
+
+Tulipe ne contient aucune liste de modèles. `tulipe models`, et la touche `m`
+dans les réglages, interrogent le service lui-même :
+
+```bash
+tulipe models --provider groq
+```
+
+C'est la seule façon d'obtenir des noms exacts et à jour. Un service qui
+n'expose pas cette liste vous laisse saisir le nom à la main.
+
+### DeepL, un cas à part
+
+DeepL ne se pilote pas par instructions : on lui donne les segments, il rend les
+segments. Cela supprime d'un coup toute une classe de pannes — il ne peut ni
+répondre à côté, ni rendre du JSON invalide, ni commenter sa traduction — et
+son `tag_handling` déplace les balises en ligne avec les mots.
+
+En échange, **le glossaire libre et les consignes de style ne s'appliquent
+pas** : ce sont des instructions, et DeepL n'en prend pas. Il exige aussi un
+code de langue cible (`--code fr`). Une clé du palier gratuit se termine par
+`:fx` ; Tulipe la reconnaît et vise `api-free.deepl.com` sans qu'on ait à le
+lui dire.
 
 ### Clé d'API
 
-Par ordre de priorité : `TULIPE_API_KEY`, puis `ANTHROPIC_API_KEY` ou
-`OPENAI_API_KEY` selon le fournisseur, puis le fichier de configuration. Une clé
+Par ordre de priorité : `TULIPE_API_KEY`, puis la variable propre au service
+(`GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPL_API_KEY`… — `tulipe providers` les
+nomme toutes), puis le fichier de configuration. Une clé
 placée dans une variable d'environnement ne touche jamais le disque — c'est la
 méthode recommandée. Le fichier de configuration est créé en `0600` et la clé
 n'est jamais affichée ni journalisée.
+
+## Formats de sortie
+
+`--format epub` (défaut) rend un livre complet : mise en forme, images,
+feuilles de style et table de matières conservées.
+
+`--format txt` rend la prose seule — titre du livre, puis chaque chapitre dans
+l'ordre de lecture, paragraphes séparés par une ligne vide, sans balise ni
+entité. Utile pour relire, comparer ou passer le texte à un autre outil. C'est
+un rendu, pas un aller-retour : on ne peut pas en reconstruire l'EPUB.
 
 ## Reprise
 
@@ -160,6 +203,8 @@ Go 1.24 ou plus récent. Aucune autre dépendance système.
 --attempts       tentatives avant redécoupage d'un lot (défaut 4)
 --context        caractères de continuité montrés au modèle (défaut 400)
 --timeout        secondes accordées à un appel au modèle (défaut 300)
+--from-code      étiquette BCP 47 de la langue source (utile à DeepL)
+--format         epub (défaut) ou txt
 --style          consignes de style ajoutées aux instructions
 --glossary-file  glossaire, une règle « source = cible » par ligne
 -o               fichier de sortie
@@ -167,11 +212,24 @@ Go 1.24 ou plus récent. Aucune autre dépendance système.
 --quiet          n'afficher que le chemin du fichier produit
 ```
 
-Exemple :
+Exemples :
 
 ```bash
+# Claude, avec un glossaire
 tulipe translate --to "español" --code es --effort high \
                  --glossary-file noms-propres.txt livre.epub
+
+# un service gratuit compatible OpenAI
+export GROQ_API_KEY=...
+tulipe translate --provider groq --model "$(tulipe models --provider groq | head -1)" \
+                 --to français --code fr livre.epub
+
+# DeepL, sortie en texte brut
+export DEEPL_API_KEY=...:fx
+tulipe translate --provider deepl --to français --code fr --format txt livre.epub
+
+# un modèle sur votre machine : rien ne sort du poste
+tulipe translate --provider ollama --model qwen2.5:7b --to français --code fr livre.epub
 ```
 
 ## Cohérence sur la longueur d'un livre
@@ -181,6 +239,8 @@ Deux mécanismes tiennent le vocabulaire et le ton :
 - le **glossaire**, injecté dans les instructions de chaque requête ;
 - la **continuité** : la fin de la traduction précédente est montrée au modèle
   à titre de contexte, sans lui être redonnée à traduire.
+
+Aucun des deux ne s'applique à DeepL, qui ne prend pas d'instructions.
 
 ## Références
 

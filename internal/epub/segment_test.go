@@ -271,3 +271,51 @@ func TestASCIIDeclarationKeepsExactOffsets(t *testing.T) {
 		t.Errorf("Apply =\n%s\nwant\n%s", out, want)
 	}
 }
+
+func TestNormaliseTextKeepsEntitiesItWasGiven(t *testing.T) {
+	cases := map[string]string{
+		// Already-valid references survive: a text span is handed to the
+		// translator with its entities, and gets them back.
+		"Tom &amp; Jerry": "Tom &amp; Jerry",
+		"l&#8217;auteur":  "l&#8217;auteur",
+		"d&nbsp;accord":   "d&nbsp;accord",
+		"&#x2014; tiret":  "&#x2014; tiret",
+		// Anything XML would misread is escaped.
+		"a & b":     "a &amp; b",
+		"R&D":       "R&amp;D",
+		"1 < 2 > 0": "1 &lt; 2 &gt; 0",
+		"&amp":      "&amp;amp",
+		"& ":        "&amp; ",
+		"&;":        "&amp;;",
+		"plain":     "plain",
+	}
+	for in, want := range cases {
+		if got := NormaliseText(in); got != want {
+			t.Errorf("NormaliseText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestApplyDoesNotDoubleEscapeTextSegments(t *testing.T) {
+	// A run of character data outside any block element is a text segment; it
+	// arrives with its entities and must not gain a second layer of them.
+	doc := []byte(`<html><body><div>Tom &amp; Jerry</div></body></html>`)
+	segs, err := Extract(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 1 || segs[0].Kind != KindText {
+		t.Fatalf("segments = %+v, want one text segment", segs)
+	}
+	out, err := Apply(doc, segs, []string{"Tom &amp; Jerry, en français"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<html><body><div>Tom &amp; Jerry, en français</div></body></html>`
+	if string(out) != want {
+		t.Errorf("Apply =\n%s\nwant\n%s", out, want)
+	}
+	if _, err := Extract(out); err != nil {
+		t.Fatalf("the result no longer parses: %v", err)
+	}
+}

@@ -9,6 +9,8 @@ configurable, un document à la fois. Interface : un menu TUI (Bubble Tea) et un
 mode non interactif à drapeaux. **Il n'y a pas, et il ne doit pas y avoir,
 d'interface web, de serveur HTTP local, ni d'assets embarqués.**
 
+Sortie en EPUB par défaut, texte brut en option (`--format txt`).
+
 ## Commandes
 
 ```bash
@@ -47,6 +49,50 @@ cmd/tulipe        drapeaux, aiguillage TUI / sans interface
 `ui`. Garder ce sens : c'est ce qui rend le cœur testable sans terminal ni
 réseau.
 
+## Le catalogue de services
+
+`internal/llm/presets.go` décrit chaque service joignable : identifiant, nom,
+protocole (`Kind`), URL de base, variables d'environnement où chercher la clé.
+`config.Provider` stocke un identifiant de preset ; `Preset.Kind` choisit le
+client. Les anciennes valeurs `anthropic` et `openai-compatible` restent des
+identifiants valides, ce qui garde les fichiers de configuration existants
+lisibles.
+
+**Deux règles à ne pas enfreindre dans ce fichier.**
+
+D'abord, **aucun quota, aucun tarif, aucune limite de débit**. Ces chiffres
+changent souvent ; inscrits en dur, ils deviennent faux sans prévenir et
+induisent l'utilisateur en erreur. Chaque preset porte un lien `Docs` vers la
+page du service, qui fait autorité. Le champ `FreeTier` dit seulement qu'une
+offre gratuite est annoncée, jamais ce qu'elle contient.
+
+Ensuite, **aucune liste de modèles**. Les noms de modèles bougent encore plus
+vite que les quotas. `llm.ModelLister` interroge le service (`GET /v1/models`
+côté OpenAI, l'endpoint Models côté Anthropic) ; `tulipe models` et la touche
+`m` des réglages s'appuient dessus. Un service qui n'expose pas de liste laisse
+l'utilisateur saisir le nom à la main — c'est le comportement voulu, pas une
+lacune à combler par une liste écrite de mémoire.
+
+Ajouter un service se limite normalement à une entrée dans `presets` ;
+`TestPresetCatalogueIsCoherent` et `TestEveryPresetIsUsableOutOfTheBox`
+vérifient qu'elle est complète et utilisable.
+
+## Deux façons d'atteindre un service
+
+`llm.Provider` (`Complete`) est le chemin par instructions : on construit un
+prompt, le modèle répond en JSON, `parseTranslations` le lit.
+
+`llm.DirectTranslator` (`TranslateSegments`) est le chemin direct : on passe les
+segments, le service rend les segments. DeepL l'emprunte. `translator.request`
+choisit par assertion de type — un fournisseur qui implémente `DirectTranslator`
+court-circuite entièrement la construction de prompt et l'analyse JSON, donc
+toutes les pannes qui vont avec.
+
+Conséquence à garder en tête : **le glossaire et les consignes de style ne
+s'appliquent pas** sur le chemin direct, puisqu'ils sont des instructions. Ils
+restent dans `Recipe` (ils changeraient le résultat sur l'autre chemin), mais
+ne sont pas envoyés à DeepL. Ne pas essayer de les simuler.
+
 ## L'invariant central
 
 **Un document XHTML n'est jamais re-sérialisé.** `epub.Extract` renvoie des
@@ -79,6 +125,23 @@ Attention aussi aux balises auto-fermantes : `<dc:language/>` n'a pas de
 contenu à remplacer. `elemSpan.rewriteText` reconstruit la paire de balises
 dans ce cas ; insérer le texte après la balise produirait `<dc:language/>fr`,
 c'est-à-dire une langue toujours vide et un nœud texte parasite.
+
+Enfin, un segment de texte brut est extrait avec ses **entités**, donc une
+traduction revient légitimement avec le `&amp;` qu'on lui a donné.
+`NormaliseText` laisse passer une référence d'entité déjà valide et n'échappe
+que le reste ; un échappement aveugle afficherait `&amp;amp;` au lecteur.
+
+## Le rendu texte
+
+`epub.PlainText` et `Book.PlainText` produisent la sortie `--format txt`. C'est
+un **rendu**, pas un aller-retour : rien de ce qu'ils écrivent ne retourne
+jamais dans un livre, ce qui est la seule raison pour laquelle ils ont le droit
+de reconstruire le texte au lieu de le découper par offsets.
+
+`Book.PlainText` lit le titre de chaque chapitre dans le document *tel qu'il est
+à cet instant*, pas dans `Chapter.Title` : après une traduction, ce dernier
+porte encore le libellé d'origine, et s'en servir imprimait chaque titre deux
+fois, une par langue.
 
 ## Règles de conduite du traducteur
 
@@ -136,7 +199,7 @@ HTTP arrive, exploitable ou non — les jetons sont dépensés dans les deux cas
 ## Clé du cache de reprise
 
 `translate.Recipe` liste **tout ce qui change le résultat** : fournisseur,
-modèle, effort, langues, glossaire, consignes de style. C'est ce qui donne la
+modèle, effort, langues (noms et codes), glossaire, consignes de style. C'est ce qui donne la
 clé du cache. Ajouter un réglage qui influence la traduction sans l'ajouter à
 `Recipe` fait resservir en silence une traduction obtenue sous d'autres
 réglages — un utilisateur qui corrige son glossaire récupérerait l'ancienne
@@ -200,7 +263,9 @@ paramètres de l'API ont changé récemment et la mémoire du modèle est périm
 
 ## Tests
 
-Les tests ne font aucun appel réseau. `internal/translate/translate_test.go`
-utilise un `fakeProvider` scripté ; `internal/ui/ui_test.go` pilote le modèle
+Les tests ne font aucun appel réseau vers l'extérieur ; `internal/llm` utilise
+`httptest` pour ses serveurs, ce qui reste local. `internal/translate/translate_test.go`
+utilise un `fakeProvider` scripté pour le chemin par instructions et un
+`fakeDirect` pour le chemin direct ; `internal/ui/ui_test.go` pilote le modèle
 Bubble Tea par messages, sans pseudo-terminal. Garder cette propriété : un test
 qui exige une clé d'API ne sera jamais exécuté.

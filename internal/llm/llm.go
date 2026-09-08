@@ -65,6 +65,39 @@ type Provider interface {
 	Complete(ctx context.Context, req Request) (*Response, error)
 }
 
+// SegmentRequest asks a backend to translate a batch of segments directly,
+// without being prompted.
+type SegmentRequest struct {
+	Segments []string
+	// TargetCode and SourceCode are language tags; an empty source asks the
+	// service to detect it.
+	TargetCode string
+	SourceCode string
+	// Markup says the segments carry inline XML tags that must survive.
+	Markup bool
+}
+
+// SegmentResponse holds one translation per requested segment.
+type SegmentResponse struct {
+	Translations []string
+	Model        string
+	Usage        Usage
+}
+
+// DirectTranslator is implemented by backends that translate natively rather
+// than by being instructed — DeepL, for one. When a provider implements it, the
+// translator hands over the segments as they are and skips prompt building and
+// JSON parsing entirely, which removes every failure mode that comes with them.
+type DirectTranslator interface {
+	TranslateSegments(ctx context.Context, req SegmentRequest) (*SegmentResponse, error)
+}
+
+// ModelLister is implemented by backends that can say which models they serve.
+// Asking the service beats keeping a list that goes stale.
+type ModelLister interface {
+	ListModels(ctx context.Context) ([]string, error)
+}
+
 // APIError is a non-2xx answer from a provider.
 type APIError struct {
 	Provider string

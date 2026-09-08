@@ -235,7 +235,7 @@ func Apply(doc []byte, segs []Segment, translations []string) ([]byte, error) {
 		case strings.TrimSpace(tr) == "":
 			out.WriteString(s.Source)
 		case s.Kind == KindText:
-			out.WriteString(escapeText(tr))
+			out.WriteString(NormaliseText(tr))
 		default:
 			out.WriteString(tr)
 		}
@@ -245,12 +245,88 @@ func Apply(doc []byte, segs []Segment, translations []string) ([]byte, error) {
 	return out.Bytes(), nil
 }
 
-// escapeText escapes a plain-text translation for insertion in an XML document.
-// xml.EscapeText is not used because it also rewrites newlines and tabs as
-// character references, which needlessly churns the document.
-func escapeText(s string) string {
-	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
-	return r.Replace(s)
+// NormaliseText prepares a plain-text translation for insertion into an XML
+// document.
+//
+// A text span is extracted as the raw bytes of the source, entities included,
+// so a translation legitimately comes back carrying the "&amp;" it was given.
+// Escaping that again would put "&amp;amp;" in front of the reader. So an
+// entity reference that is already well formed is left alone, and everything
+// else that XML would misread is escaped.
+//
+// xml.EscapeText is not used: it also rewrites newlines and tabs as character
+// references, which churns the document for nothing.
+func NormaliseText(s string) string {
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		switch c := s[i]; c {
+		case '&':
+			if n := entityLength(s[i:]); n > 0 {
+				b.WriteString(s[i : i+n])
+				i += n - 1
+				continue
+			}
+			b.WriteString("&amp;")
+		case '<':
+			b.WriteString("&lt;")
+		case '>':
+			b.WriteString("&gt;")
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
+}
+
+// entityLength returns the length of the entity reference starting at s, or 0
+// when s does not start with one.
+func entityLength(s string) int {
+	if len(s) < 3 || s[0] != '&' {
+		return 0
+	}
+	i := 1
+	if s[i] == '#' {
+		i++
+		if i < len(s) && (s[i] == 'x' || s[i] == 'X') {
+			i++
+			start := i
+			for i < len(s) && isHexDigit(s[i]) {
+				i++
+			}
+			if i == start {
+				return 0
+			}
+		} else {
+			start := i
+			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
+				i++
+			}
+			if i == start {
+				return 0
+			}
+		}
+	} else {
+		start := i
+		for i < len(s) && isNameByte(s[i]) {
+			i++
+		}
+		if i == start {
+			return 0
+		}
+	}
+	if i < len(s) && s[i] == ';' {
+		return i + 1
+	}
+	return 0
+}
+
+func isHexDigit(c byte) bool {
+	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+}
+
+func isNameByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9'
 }
 
 // strictDecoder validates model output. Unlike newDecoder it refuses unclosed

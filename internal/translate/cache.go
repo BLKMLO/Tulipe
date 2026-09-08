@@ -57,6 +57,7 @@ type Recipe struct {
 	TargetLanguage string
 	TargetCode     string
 	SourceLanguage string
+	SourceCode     string
 	Glossary       string
 	StyleNotes     string
 }
@@ -65,7 +66,7 @@ type Recipe struct {
 func (r Recipe) key(fingerprint string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		fingerprint, r.Provider, r.Model, r.Effort,
-		r.TargetLanguage, r.TargetCode, r.SourceLanguage,
+		r.TargetLanguage, r.TargetCode, r.SourceLanguage, r.SourceCode,
 		r.Glossary, r.StyleNotes,
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])[:16]
