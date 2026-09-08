@@ -1,280 +1,319 @@
+<div align="center">
+
 # 🌷 Tulipe
 
-Traduction de livres EPUB par un modèle d'IA configurable, **chapitre par chapitre**.
+**Traduisez un livre entier dans une autre langue — sans l'abîmer.**
 
-Tulipe est un binaire unique, sans interface web ni dépendance à installer. Il
-ouvre un menu interactif dans le terminal, ou s'utilise en ligne de commande
-pour traiter des livres en lot.
+Tulipe prend un EPUB, le fait traduire chapitre par chapitre par le modèle d'IA
+de votre choix, et vous rend un livre qui s'ouvre exactement comme l'original :
+même mise en page, mêmes images, même table des matières. Seule la langue a
+changé.
+
+[Télécharger](https://github.com/BLKMLO/Tulipe/releases/latest) ·
+[Premiers pas](#premiers-pas) ·
+[Services acceptés](#choisir-un-service)
+
+</div>
+
+---
 
 ```
-tulipe                          menu interactif
-tulipe livre.epub               menu, ouvert sur ce livre
-tulipe translate livre.epub     traduction sans interface
-tulipe providers                services connus et clé attendue
-tulipe models                   liste des modèles, demandée au service
-tulipe config                   configuration courante
+🌷 Tulipe  ·  traduction en cours
+
+███████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  40%  2/5 documents
+
+  ✓ I. Le retour au pays      47/47 segments en 52s
+  ✓ II. La lettre             61/62 segments en 1m11s  ⚑ 1
+  ⣾ III. Sous les tilleuls    23/58 segments
+  · IV. L'hiver
+  · V. Le départ
+
+│  écoulé  3m34s
+│  jetons  48 210 entrants · 19 844 sortants
+
+échap annuler (le travail déjà fait est conservé)
 ```
 
-## Le principe
+## Pourquoi Tulipe
 
-Un livre n'est jamais envoyé d'un bloc à un modèle. Tulipe procède ainsi :
+**Votre livre ressort intact.** Tulipe ne demande jamais au modèle de réécrire
+vos fichiers : il repère les passages de prose, les fait traduire, et les
+remet exactement à leur place. Tout le reste — mise en forme, images, notes de
+bas de page, liens — n'est même pas touché.
 
-1. Il lit le conteneur EPUB et suit le **spine** pour trouver les documents de
-   contenu dans l'ordre de lecture.
-2. Pour chaque document, il repère les passages traduisibles et **note leur
-   position exacte, en octets**, dans le fichier d'origine.
-3. Il regroupe ces passages en lots bornés (4 000 caractères par défaut) et
-   envoie **un lot par requête**. Le contexte du modèle ne porte jamais le
-   livre, ni même un chapitre entier.
-4. Il réinjecte chaque traduction à sa position d'origine. Tout ce qui n'est pas
-   un passage traduisible — prologue XML, DOCTYPE, espaces de noms, entités,
-   attributs, feuilles de style, images, code — reste **identique octet pour
-   octet**.
+**Vous choisissez qui traduit.** Treize services, dont plusieurs proposent une
+offre gratuite : Google AI Studio, Mistral, Groq, Cerebras, NVIDIA, Cohere,
+Cloudflare. Ou Claude, ou DeepL. Ou un modèle qui tourne sur votre machine,
+auquel cas votre livre ne quitte jamais votre ordinateur.
 
-Le modèle ne réécrit donc jamais le document : il ne voit que de la prose et le
-balisage en ligne qui la traverse.
+**Une interruption ne coûte rien.** Coupure réseau, fenêtre fermée, quota
+atteint : relancez, Tulipe reprend au chapitre suivant. Vous ne repayez jamais
+un chapitre déjà traduit.
 
-## Ce qui est traduit, et ce qui ne l'est pas
-
-**Traduit** : les blocs de texte (`p`, `h1`–`h6`, `li`, `blockquote`, `td`, `th`,
-`dt`, `dd`, `figcaption`, `caption`), le texte libre hors de ces blocs, le
-`<title>` des documents, et les titres de chapitres de la table des matières
-(`nav.xhtml` en EPUB 3, `toc.ncx` en EPUB 2).
-
-**Laissé intact** : `script`, `style`, `pre`, `svg`, `math`, les valeurs
-d'attributs (donc les `alt` et les `title`), les URL, et tout ce qui n'est pas
-du texte.
-
-**Refusé** : un document qui déclare un encodage autre qu'UTF-8 ou ASCII. Le
-transcoder décalerait tous les offsets sur lesquels repose la réinjection ; le
-document est donc laissé intact et signalé, plutôt que corrompu.
-
-**Métadonnées** : `<dc:language>` et l'attribut `lang` de chaque document sont
-mis à jour vers la langue cible. Le titre du livre (`<dc:title>`) et le nom de
-l'auteur sont laissés tels quels — les traduire est une décision éditoriale qui
-ne revient pas à l'outil.
-
-## Garde-fous
-
-Une traduction n'est acceptée que si elle passe ces contrôles. Sinon, **le texte
-source est conservé** et le passage est signalé dans le rapport de fin ; rien
-n'est jamais perdu silencieusement.
-
-| Contrôle | Conséquence |
-|---|---|
-| Nombre de traductions ≠ nombre de segments | un essai immédiat, puis le lot est coupé en deux, jusqu'au segment isolé |
-| Réponse illisible (pas du JSON, contenu vide) | idem |
-| Balisage mal formé | source conservée, passage signalé |
-| Balises ajoutées ou perdues | traduction gardée, passage signalé |
-| Balisage introduit dans du texte brut | source conservée, passage signalé |
-| Traduction anormalement longue | source conservée, passage signalé |
-| Erreur 429 / 5xx / réseau | nouvelle tentative, attente doublée à chaque essai |
-| Service muet | l'appel est abandonné après `--timeout`, puis réessayé |
-| Clé refusée, droit manquant, modèle inexistant, quota DeepL épuisé | arrêt immédiat de la traduction |
-| Six échecs d'affilée | arrêt de la traduction |
-| **Un document dont aucun segment n'a pu être traduit** | **document en échec, il n'est ni remplacé ni mis en cache** |
-
-Deux distinctions comptent ici. Une **panne** (429, 5xx, réseau, silence) se
-réessaie en attendant de plus en plus longtemps. Une **réponse mal formée** ne
-se réessaie qu'une fois, sans attente : patienter n'y change rien, redécouper
-si. Et un service qui échoue six fois de suite, ou qui refuse la clé, fait
-arrêter la traduction — plutôt que de parcourir tout le livre à perte.
-
-Le fichier de sortie **n'écrase jamais** un fichier existant : un suffixe
-numérique est ajouté (`livre.fr.epub`, puis `livre.fr.2.epub`).
-
-### Codes de sortie
-
-| Code | Signification |
-|---|---|
-| `0` | tous les documents ont été traduits ; des passages isolés peuvent être signalés |
-| `1` | erreur de configuration ou d'ouverture du livre, **ou** au moins un document non traduit |
-
-Quand un document échoue, le fichier est tout de même écrit : le travail
-partiel est conservé, les documents en échec y figurent en langue source, et le
-message final les nomme.
-
-## Services
-
-`tulipe providers` liste ce que Tulipe sait joindre. Trois protocoles :
-
-| Protocole | Services |
-|---|---|
-| **Anthropic** | Claude, via le SDK officiel (réglage d'effort disponible) |
-| **Compatible OpenAI** | Google AI Studio (Gemini), Mistral, Groq, Cerebras, NVIDIA NIM, Cohere, Cloudflare Workers AI, OpenAI, OpenRouter, Ollama et LM Studio en local, ou n'importe quel service parlant `/chat/completions` |
-| **DeepL** | traducteur dédié, protocole propre |
-
-Choisir un service dans les réglages remplit son URL de base ; une URL saisie à
-la main n'est jamais écrasée. Plusieurs de ces services annoncent une offre
-accessible sans carte bancaire — **les conditions exactes sont sur leur site**,
-Tulipe n'en garde aucune copie : ces limites changent trop souvent pour qu'un
-chiffre inscrit ici soit encore vrai quand vous le lirez.
-
-### Choisir un modèle
-
-Tulipe ne contient aucune liste de modèles. `tulipe models`, et la touche `m`
-dans les réglages, interrogent le service lui-même :
-
-```bash
-tulipe models --provider groq
-```
-
-C'est la seule façon d'obtenir des noms exacts et à jour. Un service qui
-n'expose pas cette liste vous laisse saisir le nom à la main.
-
-### DeepL, un cas à part
-
-DeepL ne se pilote pas par instructions : on lui donne les segments, il rend les
-segments. Cela supprime d'un coup toute une classe de pannes — il ne peut ni
-répondre à côté, ni rendre du JSON invalide, ni commenter sa traduction — et
-son `tag_handling` déplace les balises en ligne avec les mots.
-
-En échange, **le glossaire libre et les consignes de style ne s'appliquent
-pas** : ce sont des instructions, et DeepL n'en prend pas. Il exige aussi un
-code de langue cible (`--code fr`). Une clé du palier gratuit se termine par
-`:fx` ; Tulipe la reconnaît et vise `api-free.deepl.com` sans qu'on ait à le
-lui dire.
-
-### Clé d'API
-
-Par ordre de priorité : `TULIPE_API_KEY`, puis la variable propre au service
-(`GROQ_API_KEY`, `MISTRAL_API_KEY`, `DEEPL_API_KEY`… — `tulipe providers` les
-nomme toutes), puis le fichier de configuration. Une clé
-placée dans une variable d'environnement ne touche jamais le disque — c'est la
-méthode recommandée. Le fichier de configuration est créé en `0600` et la clé
-n'est jamais affichée ni journalisée.
-
-## Formats de sortie
-
-`--format epub` (défaut) rend un livre complet : mise en forme, images,
-feuilles de style et table de matières conservées.
-
-`--format txt` rend la prose seule — titre du livre, puis chaque chapitre dans
-l'ordre de lecture, paragraphes séparés par une ligne vide, sans balise ni
-entité. Utile pour relire, comparer ou passer le texte à un autre outil. C'est
-un rendu, pas un aller-retour : on ne peut pas en reconstruire l'EPUB.
-
-## Reprise
-
-Chaque document traduit est mis en cache sous
-`~/.cache/tulipe/runs/<empreinte>/`. Relancer une traduction interrompue reprend
-exactement là où elle s'est arrêtée, sans repayer un seul chapitre. Le menu
-« Reprendre une traduction » liste les travaux en cache ; `--no-resume`
-désactive le mécanisme.
-
-L'empreinte couvre **tout ce qui change le résultat** : le livre, le
-fournisseur, le modèle, l'effort, les langues source et cible, le glossaire et
-les consignes de style. Corriger un glossaire et relancer retraduit donc le
-livre au lieu de rendre l'ancienne version. Le découpage (`--chunk`,
-`--max-segments`) n'entre pas dans l'empreinte : le régler ne jette pas le
-cache.
-
-Un document en échec n'est jamais mis en cache — sans quoi l'échec serait figé
-et reproduit à chaque reprise.
-
-## Compter les jetons
-
-Tulipe n'affiche que les décomptes **rapportés par le fournisseur**. Quand un
-service ne les communique pas, l'interface l'écrit — elle n'estime rien. Aucun
-coût en monnaie n'est calculé : les tarifs changent, et un chiffre inventé
-serait pire qu'aucun chiffre.
+**Aucun échec silencieux.** Si un passage n'a pas pu être traduit, il reste en
+langue d'origine et Tulipe vous le dit, en le situant. Vous ne découvrirez pas
+au chapitre 12 qu'une clé invalide vous a rendu une copie de l'original.
 
 ## Installation
 
-Chaque version publiée porte trois archives, une par système :
+Téléchargez l'archive de votre système depuis la
+[dernière version](https://github.com/BLKMLO/Tulipe/releases/latest), extrayez
+le fichier `tulipe` qu'elle contient, et placez-le où vous voulez.
 
-| Fichier | Système |
+| Votre système | Fichier à prendre |
 |---|---|
-| `tulipe-<version>-linux-amd64.tar.gz` | Linux x86-64 |
-| `tulipe-<version>-macos-amd64.tar.gz` | macOS (Intel, et Apple Silicon via Rosetta 2) |
-| `tulipe-<version>-windows-amd64.zip` | Windows x86-64 |
+| Linux | `tulipe-…-linux-amd64.tar.gz` |
+| macOS | `tulipe-…-macos-amd64.tar.gz` |
+| Windows | `tulipe-…-windows-amd64.zip` |
 
-Chacune contient un binaire unique nommé `tulipe`, à placer dans le `PATH`.
-Un fichier `SHA256SUMS` accompagne les archives pour vérification :
+Un fichier `SHA256SUMS` accompagne les archives si vous voulez vérifier ce que
+vous avez téléchargé :
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Ou compiler depuis les sources — Go 1.24 ou plus récent, aucune autre
-dépendance système :
+Ou compilez depuis les sources — il suffit de Go 1.24, rien d'autre :
 
 ```bash
 go build -o tulipe ./cmd/tulipe
 ```
 
-## Publier une version
+## Premiers pas
 
-Le workflow `.github/workflows/release.yml` s'en charge. Deux façons de le
-déclencher :
+**1. Obtenez une clé.** Chez le service de votre choix — `tulipe providers`
+liste les treize, avec un lien vers la page où l'on récupère une clé et le nom
+de la variable où la ranger. Plusieurs n'exigent pas de carte bancaire.
 
-- **Depuis l'interface GitHub** : onglet Actions → « Release » → « Run
-  workflow », saisir la version (`v0.1.0`). Le workflow crée le tag lui-même.
-- **En poussant un tag** : `git tag -a v0.1.0 -m "Tulipe v0.1.0" && git push
-  origin v0.1.0`.
+```bash
+export GROQ_API_KEY=votre_clé
+```
 
-Dans les deux cas le workflow vérifie le formatage, `go vet` et les tests avec
-détecteur de course **avant** de compiler : une version ne part pas si le code
-n'est pas sain. Il compile ensuite les trois binaires, calcule leurs
-empreintes, et crée la release avec des notes engendrées à partir des commits.
+**2. Lancez Tulipe.**
 
-## Options de `translate`
+```bash
+tulipe
+```
+
+Un menu s'ouvre. « Réglages » pour choisir le service, la langue et le modèle
+(la touche `m` demande au service la liste de ses modèles). « Tester la
+connexion » vérifie que tout répond. Puis « Traduire un EPUB ».
+
+```
+🌷 Tulipe  ·  traduction d'EPUB, chapitre par chapitre
+
+› Traduire un EPUB          choisir un fichier et lancer la traduction
+  Reprendre une traduction  réutiliser les chapitres déjà traduits
+  Réglages                  modèle, langue, découpage, glossaire
+  Tester la connexion       une requête minuscule pour vérifier le modèle
+  Quitter
+
+│  modèle  claude-opus-5 via anthropic
+│  langue  français
+│  clé API définie (ANTHROPIC_API_KEY)
+
+↑/↓ naviguer  •  entrée choisir  •  q quitter
+```
+
+**3. Récupérez votre livre.** Il apparaît à côté de l'original, avec la langue
+dans son nom : `mon-livre.fr.epub`. L'original n'est jamais modifié, et un
+fichier existant n'est jamais écrasé.
+
+## En ligne de commande
+
+Pour traiter plusieurs livres, ou automatiser :
+
+```bash
+# le cas courant
+tulipe translate --to français --code fr mon-livre.epub
+
+# avec un service gratuit, et un glossaire pour tenir les noms propres
+tulipe models --provider groq          # pour connaître les modèles proposés
+tulipe translate --provider groq --model «le modèle choisi» \
+                 --to français --code fr \
+                 --glossary-file noms-propres.txt mon-livre.epub
+
+# en texte brut plutôt qu'en EPUB
+tulipe translate --to français --code fr --format txt mon-livre.epub
+
+# sur votre machine : rien ne sort de l'ordinateur
+tulipe translate --provider ollama --model «votre modèle local» \
+                 --to français --code fr mon-livre.epub
+```
+
+Le programme rend `0` quand le livre est entièrement traduit, `1` sinon — et
+dans ce cas il écrit quand même le fichier, en vous nommant ce qui manque.
+
+## Choisir un service
+
+`tulipe providers` affiche la liste complète avec, pour chacun, l'adresse, la
+variable d'environnement attendue et le lien vers sa page d'inscription.
+
+| | Services |
+|---|---|
+| **Offre gratuite annoncée** | Google AI Studio (Gemini), Mistral, Groq, Cerebras, NVIDIA NIM, Cohere, Cloudflare Workers AI |
+| **Sur votre machine** | Ollama, LM Studio |
+| **Autres** | Claude, OpenAI, OpenRouter, DeepL |
+
+Les conditions de chaque offre gratuite sont sur le site du service. Tulipe
+n'en garde aucune copie : ces limites changent trop souvent pour qu'un chiffre
+inscrit ici soit encore vrai quand vous le lirez.
+
+Même remarque pour les modèles : Tulipe ne contient aucune liste. `tulipe
+models` interroge le service, ce qui vous donne des noms exacts et à jour.
+
+```bash
+tulipe models --provider groq
+```
+
+**DeepL** fonctionne un peu différemment des autres. Ce n'est pas un modèle
+qu'on instruit, mais un traducteur : on lui passe le texte, il rend le texte.
+En pratique c'est plus fiable, mais le glossaire et les consignes de style ne
+s'y appliquent pas — ce sont des instructions, et DeepL n'en prend pas.
+
+### Votre clé reste chez vous
+
+Tulipe cherche la clé dans les variables d'environnement avant de regarder son
+fichier de configuration. Une clé rangée dans une variable ne touche donc
+jamais le disque. Si vous préférez la stocker, le fichier est créé en `0600` et
+la clé n'est jamais affichée ni écrite dans un journal.
+
+## Deux formats de sortie
+
+**EPUB** (par défaut) : un vrai livre, identique à l'original hormis la langue.
+
+**Texte brut** (`--format txt`) : la prose seule, chapitre après chapitre, sans
+balise. Pratique pour relire, comparer deux traductions, ou passer le texte à
+un autre outil.
+
+## Une traduction cohérente sur 300 pages
+
+Un livre découpé en centaines de requêtes risque de dériver : le même
+personnage rebaptisé au chapitre 8, le tutoiement qui devient vouvoiement.
+Deux mécanismes l'évitent.
+
+Le **glossaire** fixe le vocabulaire. Une règle par ligne, rappelée à chaque
+requête :
+
+```
+Victory Mansions = Maison de la Victoire
+Newspeak = novlangue
+```
+
+La **continuité** montre au modèle la fin du passage précédent, à titre de
+contexte seulement, pour qu'il retrouve le ton et le rythme.
+
+## Quand ça se passe mal
+
+Une traduction n'est retenue que si elle tient debout. Sinon le texte d'origine
+est conservé, et le passage est signalé dans le rapport de fin.
+
+| Ce qui arrive | Ce que fait Tulipe |
+|---|---|
+| Le modèle répond de travers | il réessaie, puis découpe le lot en deux, jusqu'au paragraphe isolé |
+| Le balisage revient cassé | le passage d'origine est gardé et signalé |
+| Le service est surchargé | nouvelle tentative, en attendant de plus en plus longtemps |
+| Le service ne répond plus | l'appel est abandonné après un délai, puis réessayé |
+| Clé refusée, quota épuisé | arrêt immédiat, plutôt que de parcourir le livre à perte |
+| Un chapitre n'a rien donné | il est marqué en échec, jamais présenté comme traduit |
+
+Les décomptes de jetons affichés sont ceux que le service communique. Quand il
+n'en communique pas, Tulipe l'écrit — il n'estime rien, et ne convertit jamais
+en euros : les tarifs changent, un chiffre inventé serait pire qu'aucun.
+
+## Comment votre livre reste intact
+
+C'est le cœur de Tulipe, et cela tient en une idée.
+
+Un EPUB est un ensemble de fichiers XHTML. L'approche naïve consiste à donner
+un chapitre entier au modèle et à lui demander de renvoyer le même fichier
+traduit. Elle casse tôt ou tard : une balise oubliée, une entité mal recopiée,
+un attribut réécrit — et la liseuse refuse le livre.
+
+Tulipe ne fait jamais cela. Il note **la position exacte, en octets**, de
+chaque passage de prose dans le fichier d'origine. Le modèle ne voit que ces
+passages. Les traductions sont ensuite réinsérées à ces positions précises, et
+tout le reste du fichier est recopié sans être relu : déclaration XML,
+DOCTYPE, feuilles de style, images, scripts, attributs.
+
+Le livre traduit est donc, littéralement, votre livre d'origine avec d'autres
+mots dedans.
+
+## Contribuer
+
+```bash
+go test ./...        # les tests
+go test -race ./...  # avec détecteur de course
+go vet ./...
+```
+
+Aucun test n'appelle le réseau ni n'exige de clé : tout tourne hors ligne.
+[`CLAUDE.md`](CLAUDE.md) décrit l'architecture et les invariants à respecter.
+
+Pour publier une version : onglet **Actions** → **Release** → **Run workflow**,
+saisir le numéro (`v0.2.0`). Le workflow vérifie le code, compile les trois
+binaires et publie. Pousser un tag `v*` produit le même résultat.
+
+## Référence
+
+### Ce qui est traduit
+
+Le texte des chapitres, les titres de la table des matières, et le titre de
+chaque document.
+
+Ne sont pas envoyés au modèle : les blocs de code préformatés, les formules,
+les graphiques vectoriels, et le contenu des attributs — donc les descriptions
+d'images. Le titre du livre et le nom de l'auteur restent eux aussi tels quels :
+les traduire est une décision éditoriale, qui ne revient pas à un outil.
+
+Un document déclarant un encodage autre qu'UTF-8 est laissé intact et signalé,
+plutôt que d'être converti au risque de l'abîmer.
+
+### Reprendre une traduction
+
+Les chapitres traduits sont conservés dans le dossier de cache de votre système
+(`~/.cache/tulipe/` sous Linux). Relancer le même livre reprend là où il s'était arrêté ; l'entrée « Reprendre une traduction »
+du menu liste les travaux en attente, et `--no-resume` ignore le cache.
+
+Changer de modèle, de langue, de glossaire ou de consignes relance une
+traduction neuve : le cache tient compte de tout ce qui modifie le résultat.
+Régler la taille des lots, en revanche, ne le jette pas.
+
+### Options de `translate`
 
 ```
 --to             langue cible, écrite comme un humain l'écrirait
---code           étiquette BCP 47 inscrite dans les métadonnées
---from           langue source (vide : détectée par le modèle)
---provider       anthropic | openai-compatible
---model          identifiant du modèle
---base-url       URL de base d'un service compatible OpenAI
---effort         low | medium | high | xhigh | max
---chunk          caractères source par requête (défaut 4000)
---max-segments   segments par requête (défaut 40)
---max-tokens     jetons de réponse par requête (défaut 16000)
---attempts       tentatives avant redécoupage d'un lot (défaut 4)
---context        caractères de continuité montrés au modèle (défaut 400)
---timeout        secondes accordées à un appel au modèle (défaut 300)
---from-code      étiquette BCP 47 de la langue source (utile à DeepL)
+--code           étiquette BCP 47 inscrite dans le livre (fr, es, pt-BR…)
+--from           langue source (vide : détectée)
+--from-code      étiquette BCP 47 de la source (utile à DeepL)
+--provider       service à utiliser (voir « tulipe providers »)
+--model          identifiant du modèle (voir « tulipe models »)
+--base-url       adresse d'un service compatible OpenAI
+--effort         low, medium, high, xhigh, max (Claude uniquement)
 --format         epub (défaut) ou txt
---style          consignes de style ajoutées aux instructions
---glossary-file  glossaire, une règle « source = cible » par ligne
 -o               fichier de sortie
---no-resume      ne pas réutiliser les chapitres déjà traduits
+--glossary-file  glossaire, une règle « source = cible » par ligne
+--style          consignes de style ajoutées aux instructions
+--no-resume      repartir de zéro, sans réutiliser le cache
 --quiet          n'afficher que le chemin du fichier produit
 ```
 
-Exemples :
+Réglages plus fins, à ne toucher qu'en cas de besoin : `--chunk` (caractères
+par requête, 4000), `--max-segments` (40), `--max-tokens` (16000),
+`--attempts` (4), `--timeout` (300 s), `--context` (400).
 
-```bash
-# Claude, avec un glossaire
-tulipe translate --to "español" --code es --effort high \
-                 --glossary-file noms-propres.txt livre.epub
+### Autres commandes
 
-# un service gratuit compatible OpenAI
-export GROQ_API_KEY=...
-tulipe translate --provider groq --model "$(tulipe models --provider groq | head -1)" \
-                 --to français --code fr livre.epub
-
-# DeepL, sortie en texte brut
-export DEEPL_API_KEY=...:fx
-tulipe translate --provider deepl --to français --code fr --format txt livre.epub
-
-# un modèle sur votre machine : rien ne sort du poste
-tulipe translate --provider ollama --model qwen2.5:7b --to français --code fr livre.epub
 ```
-
-## Cohérence sur la longueur d'un livre
-
-Deux mécanismes tiennent le vocabulaire et le ton :
-
-- le **glossaire**, injecté dans les instructions de chaque requête ;
-- la **continuité** : la fin de la traduction précédente est montrée au modèle
-  à titre de contexte, sans lui être redonnée à traduire.
-
-Aucun des deux ne s'applique à DeepL, qui ne prend pas d'instructions.
+tulipe                    ouvre le menu
+tulipe livre.epub         ouvre le menu sur ce livre
+tulipe providers          les services connus et la clé attendue
+tulipe models             les modèles, demandés au service
+tulipe config             la configuration courante
+tulipe version
+```
 
 ## Références
 
-- [EPUB 3.3, W3C Recommendation](https://www.w3.org/TR/epub-33/)
-- [Open Container Format](https://www.w3.org/TR/epub-33/#sec-ocf)
-- [SDK Go Anthropic](https://github.com/anthropics/anthropic-sdk-go)
+- [EPUB 3.3](https://www.w3.org/TR/epub-33/) — la spécification du format
+- [Open Container Format](https://www.w3.org/TR/epub-33/#sec-ocf) — la structure de l'archive
