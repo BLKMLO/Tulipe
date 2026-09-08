@@ -3,6 +3,7 @@ package llm
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync/atomic"
 
@@ -189,4 +190,26 @@ func summarise(raw string) string {
 		return raw[:max] + "…"
 	}
 	return raw
+}
+
+// ListModels implements ModelLister through the Models endpoint of the API.
+func (p *Anthropic) ListModels(ctx context.Context) ([]string, error) {
+	page, err := p.client.Models.List(ctx, anthropic.ModelListParams{})
+	if err != nil {
+		return nil, wrapAnthropicError(err)
+	}
+	var out []string
+	for page != nil {
+		for _, m := range page.Data {
+			out = append(out, m.ID)
+		}
+		page, err = page.GetNextPage()
+		if err != nil {
+			return nil, wrapAnthropicError(err)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("l'API n'a listé aucun modèle")
+	}
+	return out, nil
 }

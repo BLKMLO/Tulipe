@@ -3,6 +3,7 @@ package epub
 import (
 	"archive/zip"
 	"bytes"
+	"encoding/xml"
 	"strings"
 	"testing"
 )
@@ -188,5 +189,56 @@ func TestParseRejectsNonEPUB(t *testing.T) {
 	zw.Close()
 	if _, err := Parse(buf.Bytes()); err == nil {
 		t.Fatal("Parse accepted a zip without container.xml")
+	}
+}
+
+func TestSetLanguageRewritesSelfClosingElement(t *testing.T) {
+	// Real books do ship <dc:language/>. Inserting text after such a tag would
+	// leave the language empty and drop a stray text node into <metadata>.
+	opf := `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0">` +
+		`<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">` +
+		`<dc:title>T</dc:title><dc:language id="l"/></metadata>` +
+		`<manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest>` +
+		`<spine><itemref idref="a"/></spine></package>`
+
+	b := &Book{index: map[string]int{}}
+	b.index["c.opf"] = 0
+	b.Files = []File{{Name: "c.opf", Data: []byte(opf)}}
+	b.OPFPath = "c.opf"
+
+	if err := b.SetLanguage("fr"); err != nil {
+		t.Fatalf("SetLanguage: %v", err)
+	}
+	got, _ := b.Read("c.opf")
+	want := `<dc:language id="l">fr</dc:language>`
+	if !strings.Contains(string(got), want) {
+		t.Fatalf("got:\n%s\nwant it to contain %s", got, want)
+	}
+	if strings.Contains(string(got), `<dc:language id="l"/>fr`) {
+		t.Error("the language was written outside its element")
+	}
+
+	// The package document must still parse, and re-reading it must see "fr".
+	var p packageXML
+	if err := xml.Unmarshal(got, &p); err != nil {
+		t.Fatalf("the rewritten package document no longer parses: %v", err)
+	}
+	if len(p.Metadata.Languages) != 1 || strings.TrimSpace(p.Metadata.Languages[0]) != "fr" {
+		t.Errorf("languages = %q, want [fr]", p.Metadata.Languages)
+	}
+}
+
+func TestSetLanguageHandlesSeveralElements(t *testing.T) {
+	opf := `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf">` +
+		`<metadata xmlns:dc="http://purl.org/dc/elements/1.1/">` +
+		`<dc:language>en</dc:language><dc:language/></metadata></package>`
+	b := &Book{index: map[string]int{"c.opf": 0}, OPFPath: "c.opf",
+		Files: []File{{Name: "c.opf", Data: []byte(opf)}}}
+	if err := b.SetLanguage("es"); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.Read("c.opf")
+	if strings.Count(string(got), ">es<") != 2 {
+		t.Errorf("both language elements should carry the new code:\n%s", got)
 	}
 }

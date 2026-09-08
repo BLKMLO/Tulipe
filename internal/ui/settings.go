@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/blkmlo/tulipe/internal/config"
+	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -52,14 +53,22 @@ func newSettingsForm(cfg config.Config) settingsForm {
 func settingsFields() []field {
 	return []field{
 		{
-			label: "Fournisseur", kind: fieldChoice,
-			choices: []string{config.ProviderAnthropic, config.ProviderOpenAI},
-			help:    "anthropic passe par le SDK officiel ; openai-compatible vise un serveur local (Ollama, LM Studio) ou tout service parlant ce protocole",
-			get:     func(c config.Config) string { return c.Provider },
+			label: "Service", kind: fieldChoice, choices: llm.PresetIDs(),
+			help: "« m » interroge le service pour la liste de ses modèles ; « tulipe providers » détaille chaque entrée",
+			get:  func(c config.Config) string { return c.Provider },
 			set: func(c *config.Config, v string) error {
 				c.Provider = v
-				if v == config.ProviderAnthropic && c.Model == "" {
-					c.Model = "claude-opus-5"
+				preset, ok := llm.LookupPreset(v)
+				if !ok {
+					return fmt.Errorf("service inconnu %q", v)
+				}
+				// Carry the preset's endpoint over, unless the user typed one
+				// of their own.
+				if c.BaseURL == "" || fromAPreset(c.BaseURL) {
+					c.BaseURL = preset.BaseURL
+				}
+				if preset.Kind == llm.KindAnthropic && c.Model == "" {
+					c.Model = llm.DefaultAnthropicModel
 				}
 				return nil
 			},
@@ -71,7 +80,7 @@ func settingsFields() []field {
 			set:  func(c *config.Config, v string) error { c.Model = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Effort", kind: fieldChoice, choices: config.Efforts, only: config.ProviderAnthropic,
+			label: "Effort", kind: fieldChoice, choices: config.Efforts, only: llm.KindAnthropic,
 			help: "profondeur de réflexion du modèle : plus haut traduit mieux les passages difficiles et coûte plus cher",
 			get:  func(c config.Config) string { return c.Effort },
 			set:  func(c *config.Config, v string) error { c.Effort = v; return nil },
@@ -113,6 +122,12 @@ func settingsFields() []field {
 			set:  func(c *config.Config, v string) error { c.SourceLanguage = strings.TrimSpace(v); return nil },
 		},
 		{
+			label: "Code de langue source", kind: fieldText,
+			help: "étiquette BCP 47 de la source ; DeepL s'en sert, vide lui laisse la détecter",
+			get:  func(c config.Config) string { return c.SourceCode },
+			set:  func(c *config.Config, v string) error { c.SourceCode = strings.TrimSpace(v); return nil },
+		},
+		{
 			label: "Caractères par requête", kind: fieldInt,
 			help: "taille maximale d'un lot de segments ; c'est ce réglage qui empêche le contexte de déborder",
 			get:  func(c config.Config) string { return strconv.Itoa(c.ChunkChars) },
@@ -137,6 +152,12 @@ func settingsFields() []field {
 			set:  setInt(func(c *config.Config, n int) { c.Attempts = n }, 1, 12),
 		},
 		{
+			label: "Délai par appel (s)", kind: fieldInt,
+			help: "au-delà, l'appel est abandonné et réessayé ; empêche un service muet de bloquer la traduction",
+			get:  func(c config.Config) string { return strconv.Itoa(c.TimeoutSeconds) },
+			set:  setInt(func(c *config.Config, n int) { c.TimeoutSeconds = n }, 5, 3600),
+		},
+		{
 			label: "Continuité", kind: fieldInt,
 			help: "caractères de la traduction précédente montrés au modèle pour tenir le ton et le vocabulaire",
 			get:  func(c config.Config) string { return strconv.Itoa(c.ContextChars) },
@@ -153,6 +174,12 @@ func settingsFields() []field {
 			help: "conserve les chapitres traduits pour ne jamais les repayer après une interruption",
 			get:  func(c config.Config) string { return boolLabel(c.Resume) },
 			set:  setBool(func(c *config.Config, b bool) { c.Resume = b }),
+		},
+		{
+			label: "Format de sortie", kind: fieldChoice, choices: config.Formats,
+			help: "epub conserve la mise en forme, les images et la table des matières ; txt ne garde que la prose",
+			get:  func(c config.Config) string { return c.Format },
+			set:  func(c *config.Config, v string) error { c.Format = v; return nil },
 		},
 		{
 			label: "Dossier de sortie", kind: fieldText,
@@ -217,14 +244,26 @@ func oneLine(s string) string {
 
 // visible returns the indices of the fields that apply to the current provider.
 func (f settingsForm) visible() []int {
+	kind := f.cfg.Kind()
 	var out []int
 	for i, fd := range f.fields {
-		if fd.only != "" && fd.only != f.cfg.Provider {
+		if fd.only != "" && fd.only != kind {
 			continue
 		}
 		out = append(out, i)
 	}
 	return out
+}
+
+// fromAPreset reports whether a base URL is one the catalogue supplied, and so
+// may be replaced when the service changes.
+func fromAPreset(url string) bool {
+	for _, p := range llm.Presets() {
+		if p.BaseURL != "" && p.BaseURL == url {
+			return true
+		}
+	}
+	return false
 }
 
 func (m Model) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -277,6 +316,9 @@ func (m Model) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if f.index < len(vis)-1 {
 			f.index++
 		}
+	case "m":
+		m.settings = *f
+		return m.openModels()
 	case "s":
 		if err := f.cfg.Save(); err != nil {
 			m.failure = err.Error()
@@ -375,7 +417,7 @@ func (m Model) viewSettings() string {
 	if f.editing {
 		b.WriteString("\n\n" + help("entrée", "valider", "échap", "annuler la saisie"))
 	} else {
-		b.WriteString("\n\n" + help("↑/↓", "champ", "←/→", "changer", "entrée", "modifier", "s", "enregistrer", "échap", "retour"))
+		b.WriteString("\n\n" + help("↑/↓", "champ", "←/→", "changer", "entrée", "modifier", "m", "modèles", "s", "enregistrer", "échap", "retour"))
 	}
 	return b.String()
 }

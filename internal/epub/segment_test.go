@@ -1,6 +1,7 @@
 package epub
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -219,5 +220,102 @@ func TestSetDocumentLanguage(t *testing.T) {
 	noLang := []byte(`<html xmlns="http://www.w3.org/1999/xhtml"><body><p>x</p></body></html>`)
 	if got := SetDocumentLanguage(noLang, "fr"); string(got) != string(noLang) {
 		t.Error("a document without a language attribute must be left alone")
+	}
+}
+
+func TestExtractRefusesNonUTF8Declarations(t *testing.T) {
+	for _, enc := range []string{"ISO-8859-1", "UTF-16", "windows-1252"} {
+		doc := []byte(`<?xml version="1.0" encoding="` + enc + `"?><html><body><p>x</p></body></html>`)
+		_, err := Extract(doc)
+		var target *UnsupportedEncodingError
+		if !errors.As(err, &target) {
+			t.Errorf("Extract with encoding %s = %v, want an UnsupportedEncodingError", enc, err)
+			continue
+		}
+		if !strings.Contains(err.Error(), enc) {
+			t.Errorf("the error does not name the encoding: %v", err)
+		}
+	}
+	for _, enc := range []string{"utf-8", "UTF-8", "us-ascii"} {
+		doc := []byte(`<?xml version="1.0" encoding="` + enc + `"?><html><body><p>x</p></body></html>`)
+		if _, err := Extract(doc); err != nil {
+			t.Errorf("Extract with encoding %s = %v, want nil", enc, err)
+		}
+	}
+	// No declaration at all is UTF-8 by default and must be accepted.
+	if _, err := Extract([]byte(`<html><body><p>x</p></body></html>`)); err != nil {
+		t.Errorf("Extract without a declaration = %v, want nil", err)
+	}
+}
+
+func TestASCIIDeclarationKeepsExactOffsets(t *testing.T) {
+	doc := []byte(`<?xml version="1.0" encoding="us-ascii"?><html><body><p>hello</p><p>world</p></body></html>`)
+	segs, err := Extract(doc)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if len(segs) != 2 {
+		t.Fatalf("got %d segments, want 2", len(segs))
+	}
+	for i, s := range segs {
+		if s.Source != string(doc[s.Start:s.End]) {
+			t.Errorf("segment %d: offsets %d..%d do not match its source %q", i, s.Start, s.End, s.Source)
+		}
+	}
+	out, err := Apply(doc, segs, []string{"bonjour", "monde"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<?xml version="1.0" encoding="us-ascii"?><html><body><p>bonjour</p><p>monde</p></body></html>`
+	if string(out) != want {
+		t.Errorf("Apply =\n%s\nwant\n%s", out, want)
+	}
+}
+
+func TestNormaliseTextKeepsEntitiesItWasGiven(t *testing.T) {
+	cases := map[string]string{
+		// Already-valid references survive: a text span is handed to the
+		// translator with its entities, and gets them back.
+		"Tom &amp; Jerry": "Tom &amp; Jerry",
+		"l&#8217;auteur":  "l&#8217;auteur",
+		"d&nbsp;accord":   "d&nbsp;accord",
+		"&#x2014; tiret":  "&#x2014; tiret",
+		// Anything XML would misread is escaped.
+		"a & b":     "a &amp; b",
+		"R&D":       "R&amp;D",
+		"1 < 2 > 0": "1 &lt; 2 &gt; 0",
+		"&amp":      "&amp;amp",
+		"& ":        "&amp; ",
+		"&;":        "&amp;;",
+		"plain":     "plain",
+	}
+	for in, want := range cases {
+		if got := NormaliseText(in); got != want {
+			t.Errorf("NormaliseText(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestApplyDoesNotDoubleEscapeTextSegments(t *testing.T) {
+	// A run of character data outside any block element is a text segment; it
+	// arrives with its entities and must not gain a second layer of them.
+	doc := []byte(`<html><body><div>Tom &amp; Jerry</div></body></html>`)
+	segs, err := Extract(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 1 || segs[0].Kind != KindText {
+		t.Fatalf("segments = %+v, want one text segment", segs)
+	}
+	out, err := Apply(doc, segs, []string{"Tom &amp; Jerry, en français"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `<html><body><div>Tom &amp; Jerry, en français</div></body></html>`
+	if string(out) != want {
+		t.Errorf("Apply =\n%s\nwant\n%s", out, want)
+	}
+	if _, err := Extract(out); err != nil {
+		t.Fatalf("the result no longer parses: %v", err)
 	}
 }

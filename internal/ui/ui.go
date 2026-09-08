@@ -30,6 +30,7 @@ const (
 	screenReport
 	screenSettings
 	screenResume
+	screenModels
 )
 
 type menuEntry struct {
@@ -71,6 +72,10 @@ type Model struct {
 
 	runs      []translate.RunInfo
 	runsIndex int
+
+	models       []string
+	modelsIndex  int
+	modelsFilter string
 }
 
 type bookStats struct {
@@ -230,6 +235,9 @@ func loadRuns() tea.Msg {
 
 func testConnection(cfg config.Config) tea.Cmd {
 	return func() tea.Msg {
+		if err := cfg.Validate(); err != nil {
+			return testResultMsg{err: err}
+		}
 		p, err := cfg.NewProvider()
 		if err != nil {
 			return testResultMsg{err: err}
@@ -287,6 +295,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.outPath = outputPath(m.cfg, msg.path)
 		m.reusable, m.cacheDir = m.inspectCache()
 		m.screen = screenBook
+		return m, nil
+
+	case modelsLoadedMsg:
+		m.loading = false
+		m.models, m.modelsIndex, m.modelsFilter = msg.models, 0, ""
+		if msg.err != nil {
+			m.failure = msg.err.Error()
+		}
 		return m, nil
 
 	case runsLoadedMsg:
@@ -382,6 +398,8 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateSettings(msg)
 	case screenResume:
 		return m.updateResume(msg)
+	case screenModels:
+		return m.updateModels(msg)
 	}
 	return m, nil
 }
@@ -490,7 +508,7 @@ func (m Model) inspectCache() (int, string) {
 	if err != nil {
 		return 0, ""
 	}
-	cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.TargetLanguage, m.cfg.Model, translate.RunInfo{
+	cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.Recipe(), translate.RunInfo{
 		Source: m.bookPath, BookTitle: m.bookTitle(), TargetLanguage: m.cfg.TargetLanguage, Model: m.cfg.Model,
 	})
 	if err != nil {
@@ -517,6 +535,10 @@ func (m Model) bookTitle() string {
 // startRun kicks off the translation in a goroutine and switches to the live
 // progress screen.
 func (m Model) startRun() (tea.Model, tea.Cmd) {
+	if err := m.cfg.Validate(); err != nil {
+		m.failure = err.Error()
+		return m, nil
+	}
 	provider, err := m.cfg.NewProvider()
 	if err != nil {
 		m.failure = err.Error()
@@ -527,7 +549,7 @@ func (m Model) startRun() (tea.Model, tea.Cmd) {
 	if m.cfg.Resume {
 		fp, err := translate.Fingerprint(m.bookPath)
 		if err == nil {
-			cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.TargetLanguage, m.cfg.Model, translate.RunInfo{
+			cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.Recipe(), translate.RunInfo{
 				Source:         m.bookPath,
 				BookTitle:      m.bookTitle(),
 				TargetLanguage: m.cfg.TargetLanguage,
@@ -561,7 +583,7 @@ func (m Model) startRun() (tea.Model, tea.Cmd) {
 			events <- finishedMsg{result: res, err: err}
 			return
 		}
-		final, err := writeBook(book, out)
+		final, err := writeBook(book, out, m.cfg.Format)
 		events <- finishedMsg{result: res, out: final, err: err}
 	}()
 
@@ -570,8 +592,14 @@ func (m Model) startRun() (tea.Model, tea.Cmd) {
 
 // writeBook saves the translated book without ever overwriting an existing
 // file: a suffix is added until the name is free.
-func writeBook(book *epub.Book, path string) (string, error) {
+func writeBook(book *epub.Book, path, format string) (string, error) {
 	final := freeName(path)
+	if format == config.FormatText {
+		if err := os.WriteFile(final, []byte(book.PlainText()), 0o644); err != nil {
+			return "", err
+		}
+		return final, nil
+	}
 	if err := book.WriteFile(final); err != nil {
 		return "", err
 	}
@@ -593,8 +621,8 @@ func freeName(path string) string {
 	return path
 }
 
-// outputPath derives the destination file name from the source and the target
-// language.
+// outputPath derives the destination file name from the source, the target
+// language and the chosen format.
 func outputPath(cfg config.Config, src string) string {
 	dir := cfg.OutputDir
 	if dir == "" {
@@ -605,7 +633,11 @@ func outputPath(cfg config.Config, src string) string {
 	if tag == "" {
 		tag = slug(cfg.TargetLanguage)
 	}
-	return filepath.Join(dir, base+"."+tag+".epub")
+	ext := cfg.Format
+	if ext == "" {
+		ext = config.FormatEPUB
+	}
+	return filepath.Join(dir, base+"."+tag+"."+ext)
 }
 
 // accentFolding maps the Latin letters that carry a diacritic in the languages

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/blkmlo/tulipe/internal/config"
@@ -37,7 +38,7 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 			if title == "" {
 				title = source
 			}
-			cache, err := translate.OpenCache(translate.CacheRoot(), fp, cfg.TargetLanguage, cfg.Model, translate.RunInfo{
+			cache, err := translate.OpenCache(translate.CacheRoot(), fp, cfg.Recipe(), translate.RunInfo{
 				Source: source, BookTitle: title, TargetLanguage: cfg.TargetLanguage, Model: cfg.Model,
 			})
 			if err == nil {
@@ -82,14 +83,18 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 		return err
 	}
 
-	final, err := writeBook(book, output)
+	final, err := writeBook(book, output, cfg.Format)
 	if err != nil {
 		return err
 	}
 
+	translated, total := res.Segments()
+	failed := res.Failed()
+
 	log("")
-	log("requêtes  %d", res.Requests)
-	log("jetons    %s", usagePlain(res.Usage, res.Requests))
+	log("segments  %s", segmentsPlain(translated, total))
+	log("requêtes  %s", requestsPlain(res.Requests, res.Attempted))
+	log("jetons    %s", usagePlain(res.Usage, res.Attempted))
 	log("durée     %s", res.Duration.Round(time.Second))
 	if n := len(res.Notes); n > 0 {
 		log("signalés  %d passage(s) laissés en langue source :", n)
@@ -101,13 +106,47 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 			log("          %s", note)
 		}
 	}
+
+	// The file is always written — partial work is worth keeping — but the
+	// exit status must not claim success for a book that is not translated.
 	fmt.Println(final)
+	if len(failed) > 0 {
+		var names []string
+		for _, d := range failed {
+			names = append(names, fmt.Sprintf("%s (%v)", d.Title, d.Err))
+		}
+		return fmt.Errorf("%d document(s) non traduits, le fichier produit les contient en langue source : %s",
+			len(failed), strings.Join(names, " ; "))
+	}
+	if total > 0 && translated == 0 {
+		return errors.New("aucun segment n'a été traduit ; le fichier produit est une copie de la source")
+	}
 	return nil
 }
 
-func usagePlain(u llm.Usage, requests int) string {
-	if requests == 0 {
-		return "aucune requête — tout venait du cache de reprise"
+// segmentsPlain states what was actually translated. A run served entirely
+// from the cache has nothing to count, and saying "0 sur 0" would read as a
+// failure.
+func segmentsPlain(translated, total int) string {
+	if total == 0 {
+		return "aucun à traduire lors de cette passe"
+	}
+	return fmt.Sprintf("%d traduits sur %d", translated, total)
+}
+
+func requestsPlain(requests, attempted int) string {
+	if attempted == 0 {
+		return "aucune — tout venait du cache de reprise"
+	}
+	if attempted == requests {
+		return fmt.Sprintf("%d", requests)
+	}
+	return fmt.Sprintf("%d réussies sur %d appels", requests, attempted)
+}
+
+func usagePlain(u llm.Usage, attempted int) string {
+	if attempted == 0 {
+		return "aucun appel"
 	}
 	if !u.Reported {
 		return "non communiqués par le fournisseur"

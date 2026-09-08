@@ -9,6 +9,7 @@ package translate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -27,6 +28,9 @@ type Options struct {
 	TargetCode string
 	// SourceLanguage is optional; empty lets the model detect it.
 	SourceLanguage string
+	// SourceCode is the BCP 47 tag of the source language, used by backends
+	// that take codes rather than prose. Empty asks for detection.
+	SourceCode string
 	// Glossary pins terminology, one "source = target" rule per line.
 	Glossary string
 	// StyleNotes are free-form instructions appended to the system prompt.
@@ -42,9 +46,42 @@ type Options struct {
 	Attempts int
 	// RetryBase is the first backoff delay; it doubles on each retry.
 	RetryBase time.Duration
+	// RequestTimeout caps one call to the backend. Without it, a service that
+	// accepts a connection and then says nothing would hold the run for as
+	// long as the HTTP client allows. Zero uses the default; negative removes
+	// the cap.
+	RequestTimeout time.Duration
 	// ContextChars is how much of the previous translation is shown to the
 	// model for continuity of tone and terminology.
 	ContextChars int
+	// StopAfterFailures aborts the run once this many requests in a row have
+	// failed without a single success, so a dead or misconfigured service
+	// cannot grind through a whole book. Zero uses the default; a negative
+	// value disables the guard.
+	StopAfterFailures int
+
+	// failures is shared by every document of one book, so the guard counts a
+	// broken service once rather than once per chapter. Book sets it; Document
+	// allocates its own when it is nil.
+	failures *failureCounter
+}
+
+// ErrServiceUnusable means the translation backend failed often enough that
+// continuing would be pointless. The run stops instead of burning through the
+// rest of the book.
+var ErrServiceUnusable = errors.New("le service de traduction ne répond pas correctement")
+
+type failureCounter struct {
+	consecutive int
+	limit       int
+}
+
+func (f *failureCounter) success() { f.consecutive = 0 }
+
+// trip records a failure and reports whether the guard has been reached.
+func (f *failureCounter) trip() bool {
+	f.consecutive++
+	return f.limit > 0 && f.consecutive >= f.limit
 }
 
 // Defaults fills in every unset field with a usable value.
@@ -73,6 +110,15 @@ func (o Options) Defaults() Options {
 	if o.ContextChars == 0 {
 		o.ContextChars = 400
 	}
+	if o.RequestTimeout == 0 {
+		o.RequestTimeout = 5 * time.Minute
+	}
+	if o.StopAfterFailures == 0 {
+		o.StopAfterFailures = 6
+	}
+	if o.failures == nil {
+		o.failures = &failureCounter{limit: o.StopAfterFailures}
+	}
 	return o
 }
 
@@ -99,8 +145,12 @@ func (n Note) String() string {
 
 // DocResult is the outcome of translating one document.
 type DocResult struct {
-	Output     []byte
-	Usage      llm.Usage
+	Output []byte
+	Usage  llm.Usage
+	// Attempted counts every call made to the backend, Requests only the ones
+	// that came back usable. The gap is what tells a failing run from a run
+	// that never had to ask.
+	Attempted  int
 	Requests   int
 	Segments   int
 	Translated int
@@ -118,8 +168,9 @@ type Event struct {
 	// DocUsage and DocRequests are what this document has consumed so far, so
 	// a display can show spend accumulating rather than jumping once per
 	// chapter.
-	DocUsage    llm.Usage
-	DocRequests int
+	DocUsage     llm.Usage
+	DocRequests  int
+	DocAttempted int
 }
 
 // Document translates one XHTML (or NCX) document and returns the rewritten
@@ -142,6 +193,9 @@ func Document(ctx context.Context, p llm.Provider, opts Options, meta DocMeta, n
 		tail: tail,
 	}
 	translations := t.run()
+	if t.abortErr != nil {
+		return res, t.abortErr
+	}
 
 	out, err := epub.Apply(doc, segs, translations)
 	if err != nil {
@@ -162,10 +216,11 @@ type translator struct {
 	res      *DocResult
 	onEvent  func(Event)
 
-	tail  string // running end of the translation, for continuity
-	done  int
-	parts int
-	part  int
+	tail     string // running end of the translation, for continuity
+	done     int
+	parts    int
+	part     int
+	abortErr error // set when the guard trips; stops the whole document
 }
 
 func (t *translator) emit(msg string, retry *llm.RetryNotice) {
@@ -180,6 +235,7 @@ func (t *translator) emit(msg string, retry *llm.RetryNotice) {
 		Retry:         retry,
 		DocUsage:      t.res.Usage,
 		DocRequests:   t.res.Requests,
+		DocAttempted:  t.res.Attempted,
 	})
 }
 
@@ -198,7 +254,7 @@ func (t *translator) run() []string {
 	chunks := t.chunk()
 	t.parts = len(chunks)
 	for _, c := range chunks {
-		if t.ctx.Err() != nil {
+		if t.ctx.Err() != nil || t.abortErr != nil {
 			return out
 		}
 		t.part++
@@ -230,7 +286,7 @@ func (t *translator) chunk() [][2]int {
 // unusable, the range is halved and retried, down to a single segment; a
 // segment that still fails keeps its source text and produces a note.
 func (t *translator) translateRange(lo, hi int, out []string) {
-	if t.ctx.Err() != nil || lo >= hi {
+	if t.ctx.Err() != nil || t.abortErr != nil || lo >= hi {
 		return
 	}
 	got, err := t.request(lo, hi)
@@ -238,7 +294,7 @@ func (t *translator) translateRange(lo, hi int, out []string) {
 		t.accept(lo, hi, got, out)
 		return
 	}
-	if t.ctx.Err() != nil {
+	if t.ctx.Err() != nil || t.abortErr != nil {
 		return
 	}
 	if hi-lo == 1 {
@@ -291,12 +347,84 @@ func (t *translator) accept(lo, hi int, got []string, out []string) {
 	t.emit("", nil)
 }
 
+// answerAttempts is how many times one batch is re-sent when the model answers
+// with something unusable. A malformed answer is not a passing outage: waiting
+// does not help, and halving the batch usually does. So the model gets one
+// immediate second chance, then the caller splits.
+const answerAttempts = 2
+
 // request sends one chunk and returns exactly hi-lo translations.
 func (t *translator) request(lo, hi int) ([]string, error) {
 	sources := make([]string, 0, hi-lo)
 	for _, s := range t.segs[lo:hi] {
 		sources = append(sources, s.Source)
 	}
+	splittable := hi-lo > 1
+
+	if direct, ok := t.provider.(llm.DirectTranslator); ok {
+		return t.requestDirect(direct, lo, hi, sources, splittable)
+	}
+	return t.requestPrompt(sources, splittable)
+}
+
+// requestDirect uses a backend that translates segments natively. There is no
+// prompt to ignore and no JSON to mangle, so the only answer-level failure left
+// is a wrong number of translations.
+func (t *translator) requestDirect(direct llm.DirectTranslator, lo, hi int, sources []string, splittable bool) ([]string, error) {
+	markup := false
+	for _, s := range t.segs[lo:hi] {
+		if s.Kind == epub.KindBlock {
+			markup = true
+			break
+		}
+	}
+	req := llm.SegmentRequest{
+		Segments:   sources,
+		TargetCode: t.opts.TargetCode,
+		SourceCode: t.opts.SourceCode,
+		Markup:     markup,
+	}
+
+	var out []string
+	var answerErr error
+	err := llm.Retry(t.ctx, t.opts.Attempts, t.opts.RetryBase, func(n llm.RetryNotice) {
+		t.emit("", &n)
+	}, func() error {
+		t.res.Attempted++
+		ctx, cancel := t.requestContext()
+		resp, err := direct.TranslateSegments(ctx, req)
+		cancel()
+		if err != nil {
+			return t.timeoutError(err)
+		}
+		t.res.Usage.Add(resp.Usage)
+		if len(resp.Translations) != len(sources) {
+			// The service answered, so this is not an outage; record it and
+			// stop retrying, the caller will split.
+			answerErr = fmt.Errorf("%d traductions renvoyées pour %d segments",
+				len(resp.Translations), len(sources))
+			return nil
+		}
+		out = resp.Translations
+		return nil
+	})
+	if err != nil {
+		return nil, t.guard(err)
+	}
+	if answerErr != nil {
+		if splittable {
+			return nil, answerErr
+		}
+		return nil, t.guard(answerErr)
+	}
+	t.res.Requests++
+	t.opts.failures.success()
+	t.emit("", nil)
+	return out, nil
+}
+
+// requestPrompt instructs a chat model and reads the JSON it answers with.
+func (t *translator) requestPrompt(sources []string, splittable bool) ([]string, error) {
 	payload, err := json.Marshal(sources)
 	if err != nil {
 		return nil, err
@@ -309,31 +437,94 @@ func (t *translator) request(lo, hi int) ([]string, error) {
 		Schema:    responseSchema,
 	}
 
-	var out []string
-	err = llm.Retry(t.ctx, t.opts.Attempts, t.opts.RetryBase, func(n llm.RetryNotice) {
+	var lastErr error
+	for attempt := 1; attempt <= answerAttempts; attempt++ {
+		resp, err := t.call(req)
+		if err != nil {
+			// Transport and API failures are the backend's, not the answer's:
+			// they always count towards the guard.
+			return nil, t.guard(err)
+		}
+		parsed, err := parseTranslations(resp.Text)
+		if err == nil && len(parsed) != len(sources) {
+			err = fmt.Errorf("%d traductions renvoyées pour %d segments", len(parsed), len(sources))
+		}
+		if err == nil {
+			t.res.Requests++
+			t.opts.failures.success()
+			t.emit("", nil)
+			return parsed, nil
+		}
+		lastErr = err
+		if attempt < answerAttempts {
+			t.emit(fmt.Sprintf("réponse inexploitable, nouvel essai : %v", err), nil)
+		}
+	}
+	if splittable {
+		// The batch can still be halved, and halving is what usually rescues a
+		// malformed answer. Counting these towards the guard would abort a
+		// document the split was about to save.
+		return nil, lastErr
+	}
+	return nil, t.guard(lastErr)
+}
+
+// call runs one request, retrying transport failures, rate limits and server
+// errors with a growing wait.
+func (t *translator) call(req llm.Request) (*llm.Response, error) {
+	var resp *llm.Response
+	err := llm.Retry(t.ctx, t.opts.Attempts, t.opts.RetryBase, func(n llm.RetryNotice) {
 		t.emit("", &n)
 	}, func() error {
-		resp, err := t.provider.Complete(t.ctx, req)
+		t.res.Attempted++
+		ctx, cancel := t.requestContext()
+		r, err := t.provider.Complete(ctx, req)
+		cancel()
 		if err != nil {
-			return err
+			return t.timeoutError(err)
 		}
-		t.res.Requests++
-		t.res.Usage.Add(resp.Usage)
-		t.emit("", nil)
-		parsed, err := parseTranslations(resp.Text)
-		if err != nil {
-			return err
-		}
-		if len(parsed) != len(sources) {
-			return fmt.Errorf("%d traductions renvoyées pour %d segments", len(parsed), len(sources))
-		}
-		out = parsed
+		// The tokens are spent whether or not the answer turns out usable.
+		t.res.Usage.Add(r.Usage)
+		resp = r
 		return nil
 	})
-	if err != nil {
-		return nil, err
+	return resp, err
+}
+
+// requestContext bounds one call to the backend.
+func (t *translator) requestContext() (context.Context, context.CancelFunc) {
+	if t.opts.RequestTimeout <= 0 {
+		return t.ctx, func() {}
 	}
-	return out, nil
+	return context.WithTimeout(t.ctx, t.opts.RequestTimeout)
+}
+
+// timeoutError turns the per-request deadline into a plain, retryable error.
+// Handing back the context error unchanged would look like a cancellation, and
+// cancellations are deliberately never retried.
+func (t *translator) timeoutError(err error) error {
+	if t.ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) {
+		return err
+	}
+	return fmt.Errorf("le service n'a pas répondu en %s", t.opts.RequestTimeout)
+}
+
+// guard turns a request failure into an abort when the backend looks hopeless,
+// so that a wrong key or a dead endpoint costs a handful of calls instead of
+// one per paragraph of the book.
+func (t *translator) guard(err error) error {
+	switch {
+	case t.ctx.Err() != nil:
+		return err
+	case llm.Fatal(err):
+		t.abortErr = fmt.Errorf("%w : %w", ErrServiceUnusable, err)
+	case t.opts.failures.trip():
+		t.abortErr = fmt.Errorf("%w : %d échecs consécutifs, dernier : %w",
+			ErrServiceUnusable, t.opts.failures.consecutive, err)
+	default:
+		return err
+	}
+	return t.abortErr
 }
 
 var responseSchema = map[string]any{

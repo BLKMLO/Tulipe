@@ -1,12 +1,16 @@
 package ui
 
 import (
+	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/blkmlo/tulipe/internal/config"
+	"github.com/blkmlo/tulipe/internal/epub"
+	"github.com/blkmlo/tulipe/internal/llm"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -71,28 +75,71 @@ func TestEnterOpensSettings(t *testing.T) {
 	if m.screen != screenSettings {
 		t.Fatalf("screen = %v, want the settings screen", m.screen)
 	}
-	if !strings.Contains(m.View(), "Fournisseur") {
-		t.Error("the settings screen does not show the provider field")
+	if !strings.Contains(m.View(), "Service") {
+		t.Error("the settings screen does not show the service field")
 	}
 }
 
-func TestSettingsCycleProviderAndRevealRelevantFields(t *testing.T) {
+func TestSettingsCycleServiceAndRevealRelevantFields(t *testing.T) {
 	m := newTestModel()
 	m = press(t, m, "down", "down", "enter") // settings
 
-	// The effort field only concerns the Anthropic backend.
-	if !strings.Contains(m.View(), "Effort") {
-		t.Error("Effort should be offered for the Anthropic provider")
+	// Effort only concerns the Anthropic backend.
+	if m.settings.cfg.Provider != config.ProviderAnthropic {
+		t.Fatalf("the default service is %q", m.settings.cfg.Provider)
 	}
-	m = press(t, m, "right") // cycle provider -> openai-compatible
-	if m.settings.cfg.Provider != config.ProviderOpenAI {
-		t.Fatalf("provider = %q, want %q", m.settings.cfg.Provider, config.ProviderOpenAI)
+	if !strings.Contains(m.View(), "Effort") {
+		t.Error("Effort should be offered for the Anthropic backend")
+	}
+
+	m = press(t, m, "right") // next service in the catalogue
+	if m.settings.cfg.Provider == config.ProviderAnthropic {
+		t.Fatal("the service did not change")
 	}
 	if strings.Contains(m.View(), "Effort") {
-		t.Error("Effort must be hidden for an OpenAI-compatible provider")
+		t.Error("Effort must be hidden for a service that does not have it")
 	}
 	if !strings.Contains(m.View(), "modifications non enregistrées") {
 		t.Error("an unsaved change must be signalled")
+	}
+	// Picking a service must bring its endpoint along, or the user has to
+	// look it up by hand.
+	preset, ok := llm.LookupPreset(m.settings.cfg.Provider)
+	if !ok {
+		t.Fatalf("unknown service %q", m.settings.cfg.Provider)
+	}
+	if m.settings.cfg.BaseURL != preset.BaseURL {
+		t.Errorf("BaseURL = %q, want the preset's %q", m.settings.cfg.BaseURL, preset.BaseURL)
+	}
+}
+
+func TestCyclingServicesNeverLandsOnAnInvalidOne(t *testing.T) {
+	m := newTestModel()
+	m = press(t, m, "down", "down", "enter")
+	seen := map[string]bool{}
+	for i := 0; i < len(llm.PresetIDs())+1; i++ {
+		id := m.settings.cfg.Provider
+		if _, ok := llm.LookupPreset(id); !ok {
+			t.Fatalf("cycling produced the unknown service %q", id)
+		}
+		seen[id] = true
+		m = press(t, m, "right")
+	}
+	if len(seen) != len(llm.PresetIDs()) {
+		t.Errorf("cycling visited %d services out of %d", len(seen), len(llm.PresetIDs()))
+	}
+}
+
+func TestAHandTypedEndpointSurvivesAServiceChange(t *testing.T) {
+	m := newTestModel()
+	m.settings.cfg.Provider = config.ProviderOpenAI
+	m.settings.cfg.BaseURL = "http://localhost:9999/v1"
+	m = press(t, m, "down", "down", "enter")
+	m.settings.cfg.Provider = config.ProviderOpenAI
+	m.settings.cfg.BaseURL = "http://localhost:9999/v1"
+	m = press(t, m, "right")
+	if m.settings.cfg.BaseURL != "http://localhost:9999/v1" {
+		t.Errorf("BaseURL = %q; an endpoint the user typed must not be overwritten", m.settings.cfg.BaseURL)
 	}
 }
 
@@ -226,4 +273,117 @@ func TestSlugFoldsAccentsAndNeverReturnsEmpty(t *testing.T) {
 			t.Errorf("slug(%q) = %q, want %q", in, got, want)
 		}
 	}
+}
+
+func TestModelPickerFiltersAndSelects(t *testing.T) {
+	m := newTestModel()
+	m = press(t, m, "down", "down", "enter") // settings
+	updated, _ := m.Update(modelsLoadedMsg{
+		provider: "groq",
+		models:   []string{"alpha-8b", "beta-70b", "gamma-8b"},
+	})
+	m = updated.(Model)
+	m.screen = screenModels
+
+	view := m.View()
+	for _, want := range []string{"alpha-8b", "beta-70b", "3 modèle(s)"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("the picker does not show %q", want)
+		}
+	}
+
+	m = press(t, m, "7") // filter
+	if shown := m.shownModels(); len(shown) != 1 || shown[0] != "beta-70b" {
+		t.Fatalf("filtering on \"7\" gives %q, want [beta-70b]", shown)
+	}
+	m = press(t, m, "enter")
+	if m.settings.cfg.Model != "beta-70b" {
+		t.Errorf("Model = %q, want beta-70b", m.settings.cfg.Model)
+	}
+	if m.screen != screenSettings {
+		t.Error("choosing a model must return to the settings")
+	}
+	if !m.settings.dirty {
+		t.Error("choosing a model must mark the settings as unsaved")
+	}
+}
+
+func TestModelPickerExplainsAnEmptyList(t *testing.T) {
+	m := newTestModel()
+	updated, _ := m.Update(modelsLoadedMsg{provider: "x"})
+	m = updated.(Model)
+	m.screen = screenModels
+	if !strings.Contains(m.View(), "Aucun modèle listé") {
+		t.Error("an empty list must explain itself")
+	}
+}
+
+func TestOutputPathFollowsTheFormat(t *testing.T) {
+	cfg := config.Default()
+	if got := outputPath(cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.fr.epub") {
+		t.Errorf("outputPath = %q", got)
+	}
+	cfg.Format = config.FormatText
+	if got := outputPath(cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.fr.txt") {
+		t.Errorf("outputPath in text mode = %q, want a .txt file", got)
+	}
+}
+
+func TestWriteBookHonoursTheFormat(t *testing.T) {
+	dir := t.TempDir()
+	book := testBookForUI(t)
+
+	epubPath := filepath.Join(dir, "livre.fr.epub")
+	if _, err := writeBook(book, epubPath, config.FormatEPUB); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(epubPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := epub.Parse(raw); err != nil {
+		t.Errorf("the EPUB export is not readable: %v", err)
+	}
+
+	txtPath := filepath.Join(dir, "livre.fr.txt")
+	if _, err := writeBook(book, txtPath, config.FormatText); err != nil {
+		t.Fatal(err)
+	}
+	text, err := os.ReadFile(txtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(text), "<") || !strings.Contains(string(text), "bright cold day") {
+		t.Errorf("the text export is not plain prose:\n%s", text)
+	}
+}
+
+// testBookForUI builds a small EPUB so that the export paths can be exercised
+// without a fixture file on disk.
+func testBookForUI(t *testing.T) *epub.Book {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	add := func(name, body string) {
+		t.Helper()
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("mimetype", "application/epub+zip")
+	add("META-INF/container.xml", `<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="c.opf" media-type="application/oebps-package+xml"/></rootfiles></container>`)
+	add("c.opf", `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="3.0"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:title>Un livre</dc:title><dc:language>en</dc:language></metadata><manifest><item id="a" href="a.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="a"/></spine></package>`)
+	add("a.xhtml", `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml"><body><h1>Chapitre</h1><p>It was a bright cold day.</p></body></html>`)
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	book, err := epub.Parse(buf.Bytes())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return book
 }
