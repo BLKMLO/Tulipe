@@ -230,6 +230,9 @@ func loadRuns() tea.Msg {
 
 func testConnection(cfg config.Config) tea.Cmd {
 	return func() tea.Msg {
+		if err := cfg.Validate(); err != nil {
+			return testResultMsg{err: err}
+		}
 		p, err := cfg.NewProvider()
 		if err != nil {
 			return testResultMsg{err: err}
@@ -490,7 +493,7 @@ func (m Model) inspectCache() (int, string) {
 	if err != nil {
 		return 0, ""
 	}
-	cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.TargetLanguage, m.cfg.Model, translate.RunInfo{
+	cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.Recipe(), translate.RunInfo{
 		Source: m.bookPath, BookTitle: m.bookTitle(), TargetLanguage: m.cfg.TargetLanguage, Model: m.cfg.Model,
 	})
 	if err != nil {
@@ -517,6 +520,10 @@ func (m Model) bookTitle() string {
 // startRun kicks off the translation in a goroutine and switches to the live
 // progress screen.
 func (m Model) startRun() (tea.Model, tea.Cmd) {
+	if err := m.cfg.Validate(); err != nil {
+		m.failure = err.Error()
+		return m, nil
+	}
 	provider, err := m.cfg.NewProvider()
 	if err != nil {
 		m.failure = err.Error()
@@ -527,7 +534,7 @@ func (m Model) startRun() (tea.Model, tea.Cmd) {
 	if m.cfg.Resume {
 		fp, err := translate.Fingerprint(m.bookPath)
 		if err == nil {
-			cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.TargetLanguage, m.cfg.Model, translate.RunInfo{
+			cache, err := translate.OpenCache(translate.CacheRoot(), fp, m.cfg.Recipe(), translate.RunInfo{
 				Source:         m.bookPath,
 				BookTitle:      m.bookTitle(),
 				TargetLanguage: m.cfg.TargetLanguage,

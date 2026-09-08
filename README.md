@@ -43,6 +43,10 @@ balisage en ligne qui la traverse.
 d'attributs (donc les `alt` et les `title`), les URL, et tout ce qui n'est pas
 du texte.
 
+**Refusé** : un document qui déclare un encodage autre qu'UTF-8 ou ASCII. Le
+transcoder décalerait tous les offsets sur lesquels repose la réinjection ; le
+document est donc laissé intact et signalé, plutôt que corrompu.
+
 **Métadonnées** : `<dc:language>` et l'attribut `lang` de chaque document sont
 mis à jour vers la langue cible. Le titre du livre (`<dc:title>`) et le nom de
 l'auteur sont laissés tels quels — les traduire est une décision éditoriale qui
@@ -56,16 +60,37 @@ n'est jamais perdu silencieusement.
 
 | Contrôle | Conséquence |
 |---|---|
-| Nombre de traductions ≠ nombre de segments | le lot est coupé en deux et réessayé, jusqu'au segment isolé |
+| Nombre de traductions ≠ nombre de segments | un essai immédiat, puis le lot est coupé en deux, jusqu'au segment isolé |
+| Réponse illisible (pas du JSON, contenu vide) | idem |
 | Balisage mal formé | source conservée, passage signalé |
 | Balises ajoutées ou perdues | traduction gardée, passage signalé |
 | Balisage introduit dans du texte brut | source conservée, passage signalé |
 | Traduction anormalement longue | source conservée, passage signalé |
 | Erreur 429 / 5xx / réseau | nouvelle tentative, attente doublée à chaque essai |
-| Réponse tronquée par la limite de jetons | le lot est coupé en deux et réessayé |
+| Service muet | l'appel est abandonné après `--timeout`, puis réessayé |
+| Clé refusée, droit manquant, modèle inexistant | arrêt immédiat de la traduction |
+| Six échecs d'affilée | arrêt de la traduction |
+| **Un document dont aucun segment n'a pu être traduit** | **document en échec, il n'est ni remplacé ni mis en cache** |
+
+Deux distinctions comptent ici. Une **panne** (429, 5xx, réseau, silence) se
+réessaie en attendant de plus en plus longtemps. Une **réponse mal formée** ne
+se réessaie qu'une fois, sans attente : patienter n'y change rien, redécouper
+si. Et un service qui échoue six fois de suite, ou qui refuse la clé, fait
+arrêter la traduction — plutôt que de parcourir tout le livre à perte.
 
 Le fichier de sortie **n'écrase jamais** un fichier existant : un suffixe
 numérique est ajouté (`livre.fr.epub`, puis `livre.fr.2.epub`).
+
+### Codes de sortie
+
+| Code | Signification |
+|---|---|
+| `0` | tous les documents ont été traduits ; des passages isolés peuvent être signalés |
+| `1` | erreur de configuration ou d'ouverture du livre, **ou** au moins un document non traduit |
+
+Quand un document échoue, le fichier est tout de même écrit : le travail
+partiel est conservé, les documents en échec y figurent en langue source, et le
+message final les nomme.
 
 ## Modèles
 
@@ -89,11 +114,20 @@ n'est jamais affichée ni journalisée.
 ## Reprise
 
 Chaque document traduit est mis en cache sous
-`~/.cache/tulipe/runs/<empreinte>/`, l'empreinte étant celle du livre, de la
-langue cible et du modèle. Relancer une traduction interrompue reprend
+`~/.cache/tulipe/runs/<empreinte>/`. Relancer une traduction interrompue reprend
 exactement là où elle s'est arrêtée, sans repayer un seul chapitre. Le menu
 « Reprendre une traduction » liste les travaux en cache ; `--no-resume`
 désactive le mécanisme.
+
+L'empreinte couvre **tout ce qui change le résultat** : le livre, le
+fournisseur, le modèle, l'effort, les langues source et cible, le glossaire et
+les consignes de style. Corriger un glossaire et relancer retraduit donc le
+livre au lieu de rendre l'ancienne version. Le découpage (`--chunk`,
+`--max-segments`) n'entre pas dans l'empreinte : le régler ne jette pas le
+cache.
+
+Un document en échec n'est jamais mis en cache — sans quoi l'échec serait figé
+et reproduit à chaque reprise.
 
 ## Compter les jetons
 
@@ -125,6 +159,7 @@ Go 1.24 ou plus récent. Aucune autre dépendance système.
 --max-tokens     jetons de réponse par requête (défaut 16000)
 --attempts       tentatives avant redécoupage d'un lot (défaut 4)
 --context        caractères de continuité montrés au modèle (défaut 400)
+--timeout        secondes accordées à un appel au modèle (défaut 300)
 --style          consignes de style ajoutées aux instructions
 --glossary-file  glossaire, une règle « source = cible » par ligne
 -o               fichier de sortie

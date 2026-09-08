@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -45,6 +47,8 @@ type Config struct {
 	MaxTokens    int64 `json:"max_tokens"`
 	Attempts     int   `json:"attempts"`
 	ContextChars int   `json:"context_chars"`
+	// TimeoutSeconds caps one call to the model.
+	TimeoutSeconds int `json:"timeout_seconds"`
 
 	OutputDir string `json:"output_dir,omitempty"`
 	Resume    bool   `json:"resume"`
@@ -64,6 +68,7 @@ func Default() Config {
 		MaxTokens:        16000,
 		Attempts:         4,
 		ContextChars:     400,
+		TimeoutSeconds:   300,
 		Resume:           true,
 	}
 }
@@ -136,7 +141,68 @@ func (c Config) normalise() Config {
 	if c.ContextChars <= 0 {
 		c.ContextChars = d.ContextChars
 	}
+	if c.TimeoutSeconds <= 0 {
+		c.TimeoutSeconds = d.TimeoutSeconds
+	}
 	return c
+}
+
+// Validate refuses a configuration that cannot do what it says. Silently
+// falling back to a default would leave the user believing a setting took
+// effect when it did not.
+func (c Config) Validate() error {
+	switch c.Provider {
+	case ProviderAnthropic, ProviderOpenAI:
+	default:
+		return fmt.Errorf("fournisseur inconnu %q ; attendu %q ou %q", c.Provider, ProviderAnthropic, ProviderOpenAI)
+	}
+	if strings.TrimSpace(c.Model) == "" {
+		return errors.New("aucun modèle indiqué")
+	}
+	if strings.TrimSpace(c.TargetLanguage) == "" {
+		return errors.New("aucune langue cible indiquée")
+	}
+	if c.Provider == ProviderOpenAI && strings.TrimSpace(c.BaseURL) == "" {
+		return errors.New("un service compatible OpenAI exige une URL de base (par exemple http://localhost:11434/v1)")
+	}
+	if c.BaseURL != "" {
+		u, err := url.Parse(c.BaseURL)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			return fmt.Errorf("URL de base invalide %q ; attendu une adresse complète comme http://localhost:11434/v1", c.BaseURL)
+		}
+		if u.Scheme != "http" && u.Scheme != "https" {
+			return fmt.Errorf("URL de base en %q ; seuls http et https sont acceptés", u.Scheme)
+		}
+	}
+	if c.Effort != "" && c.Provider == ProviderAnthropic && !slices.Contains(Efforts, c.Effort) {
+		return fmt.Errorf("effort inconnu %q ; attendu %s", c.Effort, strings.Join(Efforts, ", "))
+	}
+	for _, f := range []struct {
+		name string
+		v    int
+		min  int
+	}{
+		{"--chunk", c.ChunkChars, 1},
+		{"--max-segments", c.MaxSegments, 1},
+		{"--max-tokens", int(c.MaxTokens), 1},
+		{"--attempts", c.Attempts, 1},
+		{"--context", c.ContextChars, 0},
+		{"--timeout", c.TimeoutSeconds, 1},
+	} {
+		if f.v < f.min {
+			return fmt.Errorf("%s vaut %d ; le minimum est %d", f.name, f.v, f.min)
+		}
+	}
+	if c.OutputDir != "" {
+		info, err := os.Stat(c.OutputDir)
+		if err != nil {
+			return fmt.Errorf("dossier de sortie inutilisable : %w", err)
+		}
+		if !info.IsDir() {
+			return fmt.Errorf("le dossier de sortie %q n'est pas un dossier", c.OutputDir)
+		}
+	}
+	return nil
 }
 
 // ResolveAPIKey returns the key to use and where it came from. Environment
@@ -202,6 +268,28 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	}
 }
 
+// Recipe lists the settings that change what a translation comes out as. It is
+// what the resume cache is keyed on, so that changing a glossary, a language or
+// a model never reuses work done under the previous settings.
+func (c Config) Recipe() translate.Recipe {
+	effort := c.Effort
+	if c.Provider != ProviderAnthropic {
+		// Effort is meaningless for the other backend; including it would
+		// invalidate caches for no reason.
+		effort = ""
+	}
+	return translate.Recipe{
+		Provider:       c.Provider,
+		Model:          c.Model,
+		Effort:         effort,
+		TargetLanguage: c.TargetLanguage,
+		TargetCode:     c.TargetCode,
+		SourceLanguage: c.SourceLanguage,
+		Glossary:       c.Glossary,
+		StyleNotes:     c.StyleNotes,
+	}
+}
+
 // TranslateOptions converts the configuration into translator options.
 func (c Config) TranslateOptions() translate.Options {
 	return translate.Options{
@@ -216,6 +304,7 @@ func (c Config) TranslateOptions() translate.Options {
 		Attempts:       c.Attempts,
 		RetryBase:      2 * time.Second,
 		ContextChars:   c.ContextChars,
+		RequestTimeout: time.Duration(c.TimeoutSeconds) * time.Second,
 	}
 }
 

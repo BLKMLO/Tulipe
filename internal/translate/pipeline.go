@@ -28,9 +28,13 @@ type DocState struct {
 	Status        Status
 	TotalSegments int
 	DoneSegments  int
-	Notes         int
-	Err           error
-	Duration      time.Duration
+	// Translated is how many segments actually came back in the target
+	// language. A document where this stays at zero has not been translated,
+	// whatever else happened.
+	Translated int
+	Notes      int
+	Err        error
+	Duration   time.Duration
 }
 
 // Progress is emitted whenever anything moves. Documents holds the state of
@@ -42,6 +46,7 @@ type Progress struct {
 	Retry     *llm.RetryNotice
 	Usage     llm.Usage
 	Requests  int
+	Attempted int
 }
 
 // Result is the outcome of translating a whole book.
@@ -50,8 +55,30 @@ type Result struct {
 	Documents []DocState
 	Usage     llm.Usage
 	Requests  int
+	Attempted int
 	Notes     []Note
 	Duration  time.Duration
+}
+
+// Segments totals the translatable segments of the run and how many of them
+// came back translated.
+func (r *Result) Segments() (translated, total int) {
+	for _, d := range r.Documents {
+		translated += d.Translated
+		total += d.TotalSegments
+	}
+	return translated, total
+}
+
+// Failed lists the documents that could not be translated.
+func (r *Result) Failed() []DocState {
+	var out []DocState
+	for _, d := range r.Documents {
+		if d.Status == StatusFailed {
+			out = append(out, d)
+		}
+	}
+	return out
 }
 
 // Cache stores documents already translated so an interrupted run can be
@@ -110,7 +137,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 	// live carries what the document in flight has consumed; res.Usage only
 	// grows once a document is finished.
 	var liveUsage llm.Usage
-	var liveRequests int
+	var liveRequests, liveAttempted int
 
 	report := func(current int, msg string, retry *llm.RetryNotice) {
 		if onProgress == nil {
@@ -123,6 +150,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		onProgress(Progress{
 			Documents: snapshot, Current: current, Message: msg, Retry: retry,
 			Usage: total, Requests: res.Requests + liveRequests,
+			Attempted: res.Attempted + liveAttempted,
 		})
 	}
 
@@ -156,15 +184,23 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 
 		docStart := time.Now()
 		meta := DocMeta{BookTitle: book.Title, Title: res.Documents[i].Title, Index: i + 1, Total: len(names)}
-		liveUsage, liveRequests = llm.Usage{}, 0
+		liveUsage, liveRequests, liveAttempted = llm.Usage{}, 0, 0
 		out, err := Document(ctx, p, opts.Options, meta, name, doc, tail, func(e Event) {
 			res.Documents[i].DoneSegments = e.DoneSegments
 			res.Documents[i].TotalSegments = e.TotalSegments
-			liveUsage, liveRequests = e.DocUsage, e.DocRequests
+			liveUsage, liveRequests, liveAttempted = e.DocUsage, e.DocRequests, e.DocAttempted
 			report(i, e.Message, e.Retry)
 		})
-		liveUsage, liveRequests = llm.Usage{}, 0
+		liveUsage, liveRequests, liveAttempted = llm.Usage{}, 0, 0
 		res.Documents[i].Duration = time.Since(docStart)
+
+		if out != nil {
+			res.Usage.Add(out.Usage)
+			res.Requests += out.Requests
+			res.Attempted += out.Attempted
+			res.Notes = append(res.Notes, out.Notes...)
+			res.Documents[i].Notes = len(out.Notes)
+		}
 
 		if err != nil {
 			res.Documents[i].Status = StatusFailed
@@ -173,19 +209,28 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 			if ctx.Err() != nil {
 				return res, ctx.Err()
 			}
-			if opts.StopOnError {
-				return res, fmt.Errorf("%s: %w", name, err)
+			// A backend that has stopped answering will not start again on the
+			// next chapter; carrying on would only cost time and money.
+			if errors.Is(err, ErrServiceUnusable) || opts.StopOnError {
+				return res, fmt.Errorf("%s : %w", name, err)
 			}
+			continue
+		}
+
+		// A document where nothing at all came back translated is a failure,
+		// not a success with notes. Replacing it with its own source text and
+		// reporting a tick would hand the reader an untranslated book.
+		if out.Segments > 0 && out.Translated == 0 {
+			res.Documents[i].Status = StatusFailed
+			res.Documents[i].Err = fmt.Errorf("aucun des %d segments n'a pu être traduit", out.Segments)
+			report(i, "", nil)
 			continue
 		}
 
 		book.Replace(name, epub.SetDocumentLanguage(out.Output, opts.TargetCode))
 		tail = out.Tail
-		res.Usage.Add(out.Usage)
-		res.Requests += out.Requests
-		res.Notes = append(res.Notes, out.Notes...)
 		res.Documents[i].Status = StatusDone
-		res.Documents[i].Notes = len(out.Notes)
+		res.Documents[i].Translated = out.Translated
 		res.Documents[i].DoneSegments = out.Segments
 		res.Documents[i].TotalSegments = out.Segments
 

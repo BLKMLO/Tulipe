@@ -97,6 +97,7 @@ func showConfig() error {
 	fmt.Printf("découpage          %d caractères / %d segments par requête\n", cfg.ChunkChars, cfg.MaxSegments)
 	fmt.Printf("jetons de réponse  %d\n", cfg.MaxTokens)
 	fmt.Printf("tentatives         %d\n", cfg.Attempts)
+	fmt.Printf("délai par appel    %d s\n", cfg.TimeoutSeconds)
 	fmt.Printf("continuité         %d caractères\n", cfg.ContextChars)
 	fmt.Printf("reprise            %v\n", cfg.Resume)
 	fmt.Println("dossier de sortie  " + orNone(cfg.OutputDir))
@@ -132,6 +133,7 @@ func translateFlags(cfg *config.Config, o *cliOptions) *flag.FlagSet {
 	fs.Int64Var(&cfg.MaxTokens, "max-tokens", cfg.MaxTokens, "jetons de réponse par requête")
 	fs.IntVar(&cfg.Attempts, "attempts", cfg.Attempts, "tentatives avant redécoupage d'un lot")
 	fs.IntVar(&cfg.ContextChars, "context", cfg.ContextChars, "caractères de continuité montrés au modèle")
+	fs.IntVar(&cfg.TimeoutSeconds, "timeout", cfg.TimeoutSeconds, "secondes accordées à un appel au modèle")
 	fs.StringVar(&cfg.StyleNotes, "style", cfg.StyleNotes, "consignes de style ajoutées aux instructions")
 	fs.StringVar(&o.output, "o", "", "fichier de sortie (défaut : <livre>.<code>.epub, jamais écrasé)")
 	fs.StringVar(&o.glossaryFile, "glossary-file", "", "fichier de glossaire, une règle « source = cible » par ligne")
@@ -169,9 +171,20 @@ func runTranslate(args []string) error {
 		cfg.Resume = false
 	}
 
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+
 	source, err := filepath.Abs(fs.Arg(0))
 	if err != nil {
 		return err
+	}
+	info, err := os.Stat(source)
+	if err != nil {
+		return err
+	}
+	if info.IsDir() {
+		return fmt.Errorf("%s est un dossier, pas un fichier EPUB", source)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

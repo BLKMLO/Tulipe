@@ -3,9 +3,11 @@ package translate
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/blkmlo/tulipe/internal/epub"
 	"github.com/blkmlo/tulipe/internal/llm"
@@ -14,19 +16,46 @@ import (
 // fakeProvider answers with a scripted transformation of the segments it is
 // given, so the pipeline can be tested without a network call.
 type fakeProvider struct {
-	calls  int
-	sizes  []int
-	answer func(call int, sources []string) (string, error)
+	calls int
+	sizes []int
+	// honourContext makes the fake respect the per-request deadline, the way a
+	// real client does.
+	honourContext bool
+	answer        func(call int, sources []string) (string, error)
 }
 
 func (f *fakeProvider) ID() string    { return "fake" }
 func (f *fakeProvider) Model() string { return "fake-model" }
 
-func (f *fakeProvider) Complete(_ context.Context, req llm.Request) (*llm.Response, error) {
+func (f *fakeProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	f.calls++
 	sources := extractPayload(req.User)
 	f.sizes = append(f.sizes, len(sources))
-	text, err := f.answer(f.calls, sources)
+
+	type result struct {
+		text string
+		err  error
+	}
+	done := make(chan result, 1)
+	call := f.calls
+	go func() {
+		text, err := f.answer(call, sources)
+		done <- result{text, err}
+	}()
+
+	var text string
+	var err error
+	if f.honourContext {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case r := <-done:
+			text, err = r.text, r.err
+		}
+	} else {
+		r := <-done
+		text, err = r.text, r.err
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +181,9 @@ func TestUntranslatableSegmentKeepsSourceAndNotes(t *testing.T) {
 	p := &fakeProvider{answer: func(_ int, _ []string) (string, error) {
 		return "", fmt.Errorf("upstream is unhappy")
 	}}
-	opts := Options{TargetLanguage: "fr", Attempts: 1}
+	// The guard is disabled here: this test is about what a single bad segment
+	// does, not about a dead backend.
+	opts := Options{TargetLanguage: "fr", Attempts: 1, StopAfterFailures: -1}
 	res, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
 	if err != nil {
 		t.Fatalf("Document: %v", err)
@@ -268,5 +299,144 @@ func TestContextTailIsPassedOn(t *testing.T) {
 	}
 	if !sawTail {
 		t.Error("the follow-up document was translated without continuity context")
+	}
+}
+
+func TestGuardStopsAfterRepeatedFailures(t *testing.T) {
+	p := &fakeProvider{answer: func(_ int, _ []string) (string, error) {
+		return "", fmt.Errorf("le service est en panne")
+	}}
+	opts := Options{TargetLanguage: "fr", Attempts: 1, StopAfterFailures: 3}
+	_, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if !errors.Is(err, ErrServiceUnusable) {
+		t.Fatalf("Document = %v, want ErrServiceUnusable", err)
+	}
+	if p.calls != 3 {
+		t.Errorf("the backend was called %d times, want exactly the 3 allowed by the guard", p.calls)
+	}
+}
+
+func TestGuardStopsImmediatelyOnFatalError(t *testing.T) {
+	// A wrong key never becomes a right key: one call is enough to know.
+	p := &fakeProvider{answer: func(_ int, _ []string) (string, error) {
+		return "", &llm.APIError{Provider: "fake", Status: 401, Message: "clé invalide"}
+	}}
+	opts := Options{TargetLanguage: "fr", Attempts: 4, StopAfterFailures: 20}
+	_, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if !errors.Is(err, ErrServiceUnusable) {
+		t.Fatalf("Document = %v, want ErrServiceUnusable", err)
+	}
+	if p.calls != 1 {
+		t.Errorf("the backend was called %d times, want 1 — a 401 must not be retried", p.calls)
+	}
+}
+
+func TestGuardResetsAfterASuccess(t *testing.T) {
+	// Intermittent failures must not add up to an abort as long as requests
+	// keep succeeding in between.
+	p := &fakeProvider{answer: func(call int, s []string) (string, error) {
+		if call%2 == 1 {
+			return "", fmt.Errorf("hoquet passager")
+		}
+		return envelope(upper(s)), nil
+	}}
+	opts := Options{TargetLanguage: "fr", Attempts: 2, RetryBase: time.Millisecond, StopAfterFailures: 3}
+	res, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Translated != 4 {
+		t.Errorf("translated %d segments, want 4", res.Translated)
+	}
+}
+
+func TestAttemptedCountsEveryCall(t *testing.T) {
+	p := &fakeProvider{answer: func(call int, s []string) (string, error) {
+		if call == 1 {
+			return "", fmt.Errorf("raté")
+		}
+		return envelope(upper(s)), nil
+	}}
+	opts := Options{TargetLanguage: "fr", Attempts: 3, RetryBase: time.Millisecond}
+	res, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Attempted != 2 || res.Requests != 1 {
+		t.Errorf("Attempted=%d Requests=%d, want 2 and 1", res.Attempted, res.Requests)
+	}
+}
+
+// TestSplittingIsNotMistakenForABrokenService guards against a false positive:
+// a model that always returns one item too few forces a long chain of splits,
+// and each split looks like a failure. The guard must not abort a document the
+// split was about to rescue.
+func TestSplittingIsNotMistakenForABrokenService(t *testing.T) {
+	var body strings.Builder
+	body.WriteString(`<html><body>`)
+	for i := 0; i < 40; i++ {
+		fmt.Fprintf(&body, "<p>paragraphe numero %d</p>", i)
+	}
+	body.WriteString(`</body></html>`)
+
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) {
+		if len(s) > 1 {
+			return envelope(upper(s)[:len(s)-1]), nil
+		}
+		return envelope(upper(s)), nil
+	}}
+	opts := Options{TargetLanguage: "fr", Attempts: 1, MaxSegments: 40, ChunkChars: 100000, StopAfterFailures: 6}
+	res, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(body.String()), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Translated != 40 {
+		t.Errorf("translated %d of 40 segments; the split should have rescued them all", res.Translated)
+	}
+}
+
+// TestBadAnswersDoNotWaitBetweenTries keeps the split path fast: backing off
+// before re-sending a malformed answer wastes the user's time for nothing.
+func TestBadAnswersDoNotWaitBetweenTries(t *testing.T) {
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) {
+		if len(s) > 1 {
+			return envelope(upper(s)[:len(s)-1]), nil
+		}
+		return envelope(upper(s)), nil
+	}}
+	opts := Options{
+		TargetLanguage: "fr", Attempts: 4,
+		RetryBase:         30 * time.Second, // would dominate if it were applied
+		StopAfterFailures: -1,
+	}
+	start := time.Now()
+	if _, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil); err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("recovering from malformed answers took %s; no backoff should apply to them", elapsed)
+	}
+}
+
+func TestRequestTimeoutIsRetryableAndNamed(t *testing.T) {
+	p := &fakeProvider{answer: func(call int, s []string) (string, error) {
+		if call == 1 {
+			// Simulate a service that accepts the call and says nothing.
+			time.Sleep(80 * time.Millisecond)
+			return envelope(upper(s)), nil
+		}
+		return envelope(upper(s)), nil
+	}}
+	p.honourContext = true
+	opts := Options{
+		TargetLanguage: "fr", Attempts: 3, RetryBase: time.Millisecond,
+		RequestTimeout: 20 * time.Millisecond, StopAfterFailures: -1,
+	}
+	res, err := Document(context.Background(), p, opts, DocMeta{}, "c.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Attempted < 2 {
+		t.Errorf("Attempted = %d; a timed-out call must be retried, not abandoned", res.Attempted)
 	}
 }

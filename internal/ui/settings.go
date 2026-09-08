@@ -137,6 +137,12 @@ func settingsFields() []field {
 			set:  setInt(func(c *config.Config, n int) { c.Attempts = n }, 1, 12),
 		},
 		{
+			label: "Délai par appel (s)", kind: fieldInt,
+			help: "au-delà, l'appel est abandonné et réessayé ; empêche un service muet de bloquer la traduction",
+			get:  func(c config.Config) string { return strconv.Itoa(c.TimeoutSeconds) },
+			set:  setInt(func(c *config.Config, n int) { c.TimeoutSeconds = n }, 5, 3600),
+		},
+		{
 			label: "Continuité", kind: fieldInt,
 			help: "caractères de la traduction précédente montrés au modèle pour tenir le ton et le vocabulaire",
 			get:  func(c config.Config) string { return strconv.Itoa(c.ContextChars) },

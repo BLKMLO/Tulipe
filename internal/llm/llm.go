@@ -137,6 +137,21 @@ func Retryable(err error) bool {
 	return true
 }
 
+// Fatal reports whether an error will keep happening however long we wait:
+// wrong credentials, no permission, or a model or endpoint that does not
+// exist. Sending more requests would only waste time and money.
+func Fatal(err error) bool {
+	var api *APIError
+	if !errors.As(err, &api) {
+		return false
+	}
+	switch api.Status {
+	case 401, 403, 404:
+		return true
+	}
+	return false
+}
+
 // RetryNotice describes an attempt that failed and is about to be retried.
 type RetryNotice struct {
 	Attempt int

@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 )
 
@@ -45,12 +46,36 @@ func (r RunInfo) Done() int {
 	return n
 }
 
-// OpenCache opens, creating it if needed, the cache for one (book, language,
-// model) triple. fingerprint identifies the source book, normally the SHA-256
-// of the file.
-func OpenCache(root, fingerprint, target, model string, info RunInfo) (*FileCache, error) {
-	sum := sha256.Sum256([]byte(fingerprint + "\x00" + target + "\x00" + model))
-	dir := filepath.Join(root, hex.EncodeToString(sum[:])[:16])
+// Recipe is everything that changes what a translation comes out as. Two runs
+// that agree on all of it may share cached documents; two runs that differ on
+// any of it must not — otherwise fixing a glossary and running again would
+// silently hand back the old translation.
+type Recipe struct {
+	Provider       string
+	Model          string
+	Effort         string
+	TargetLanguage string
+	TargetCode     string
+	SourceLanguage string
+	Glossary       string
+	StyleNotes     string
+}
+
+// key derives the cache identity of a book translated under this recipe.
+func (r Recipe) key(fingerprint string) string {
+	sum := sha256.Sum256([]byte(strings.Join([]string{
+		fingerprint, r.Provider, r.Model, r.Effort,
+		r.TargetLanguage, r.TargetCode, r.SourceLanguage,
+		r.Glossary, r.StyleNotes,
+	}, "\x00")))
+	return hex.EncodeToString(sum[:])[:16]
+}
+
+// OpenCache opens, creating it if needed, the cache for one book translated
+// under one recipe. fingerprint identifies the source book, normally the
+// SHA-256 of the file.
+func OpenCache(root, fingerprint string, recipe Recipe, info RunInfo) (*FileCache, error) {
+	dir := filepath.Join(root, recipe.key(fingerprint))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}

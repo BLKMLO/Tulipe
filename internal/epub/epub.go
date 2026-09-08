@@ -382,17 +382,21 @@ func (b *Book) SetLanguage(code string) error {
 	if !ok {
 		return fmt.Errorf("le document de package %q est absent", b.OPFPath)
 	}
-	spans := elementTextSpans(raw, "language")
+	spans := elementSpans(raw, "language")
 	if len(spans) == 0 {
 		return fmt.Errorf("aucun élément <dc:language> dans %s", b.OPFPath)
 	}
-	sort.Slice(spans, func(i, j int) bool { return spans[i].start < spans[j].start })
+	sort.Slice(spans, func(i, j int) bool { return spans[i].tagStart < spans[j].tagStart })
 	var out bytes.Buffer
 	prev := 0
 	for _, s := range spans {
-		out.Write(raw[prev:s.start])
-		out.WriteString(code)
-		prev = s.end
+		start, end, replacement := s.rewriteText(raw, code)
+		if start < prev {
+			continue
+		}
+		out.Write(raw[prev:start])
+		out.WriteString(replacement)
+		prev = end
 	}
 	out.Write(raw[prev:])
 	b.Replace(b.OPFPath, out.Bytes())

@@ -141,7 +141,7 @@ func (m Model) viewRun() string {
 
 	b.WriteString("\n" + panelStyle.Render(strings.Join([]string{
 		labelStyle.Render("écoulé  ") + valueStyle.Render(m.elapsed.Round(time.Second).String()),
-		labelStyle.Render("jetons  ") + valueStyle.Render(usageLine(m.run.progress.Usage, m.run.progress.Requests)),
+		labelStyle.Render("jetons  ") + valueStyle.Render(usageLine(m.run.progress.Usage, m.run.progress.Attempted)),
 	}, "\n")))
 
 	if n := len(m.run.log); n > 0 {
@@ -181,7 +181,7 @@ func docLine(d translate.DocState, current bool, spin string) string {
 	case d.Status == translate.StatusRunning && d.TotalSegments > 0:
 		line += dimStyle.Render(fmt.Sprintf("  %d/%d segments", d.DoneSegments, d.TotalSegments))
 	case d.Status == translate.StatusDone:
-		line += dimStyle.Render(fmt.Sprintf("  %d segments en %s", d.TotalSegments, d.Duration.Round(time.Second)))
+		line += dimStyle.Render(fmt.Sprintf("  %d/%d segments en %s", d.Translated, d.TotalSegments, d.Duration.Round(time.Second)))
 	case d.Status == translate.StatusCached:
 		line += dimStyle.Render("  réutilisé")
 	case d.Status == translate.StatusFailed && d.Err != nil:
@@ -205,6 +205,7 @@ func (m Model) viewReport() string {
 		return b.String()
 	}
 
+	translated, totalSegments := m.result.Segments()
 	var done, cached, failed int
 	for _, d := range m.result.Documents {
 		switch d.Status {
@@ -219,14 +220,27 @@ func (m Model) viewReport() string {
 
 	rows := []string{
 		labelStyle.Render("documents ") + valueStyle.Render(fmt.Sprintf("%d traduits, %d réutilisés, %d en échec", done, cached, failed)),
-		labelStyle.Render("requêtes  ") + valueStyle.Render(fmt.Sprintf("%d", m.result.Requests)),
-		labelStyle.Render("jetons    ") + valueStyle.Render(usageLine(m.result.Usage, m.result.Requests)),
+		labelStyle.Render("segments  ") + valueStyle.Render(segmentsLine(translated, totalSegments)),
+		labelStyle.Render("requêtes  ") + valueStyle.Render(requestsLine(m.result.Requests, m.result.Attempted)),
+		labelStyle.Render("jetons    ") + valueStyle.Render(usageLine(m.result.Usage, m.result.Attempted)),
 		labelStyle.Render("durée     ") + valueStyle.Render(m.result.Duration.Round(time.Second).String()),
 	}
 	if m.failure == "" {
 		rows = append(rows, labelStyle.Render("fichier   ")+okStyle.Render(m.outPath))
 	}
 	b.WriteString(panelStyle.Render(strings.Join(rows, "\n")))
+
+	if bad := m.result.Failed(); len(bad) > 0 {
+		b.WriteString("\n\n" + errStyle.Render(fmt.Sprintf("✗ %d document(s) non traduits", len(bad))) +
+			dimStyle.Render(" — ils figurent en langue source dans le fichier produit") + "\n")
+		for i, d := range bad {
+			if i == 5 {
+				b.WriteString(dimStyle.Render(fmt.Sprintf("  … et %d autres\n", len(bad)-5)))
+				break
+			}
+			b.WriteString(dimStyle.Render("  "+truncate(d.Title, 40)) + errStyle.Render("  "+truncate(errText(d.Err), 70)) + "\n")
+		}
+	}
 
 	if n := len(m.result.Notes); n > 0 {
 		b.WriteString("\n\n" + warnStyle.Render(fmt.Sprintf("⚑ %d passage(s) signalé(s)", n)) +
@@ -265,9 +279,9 @@ func (m Model) viewResume() string {
 	return b.String()
 }
 
-func usageLine(u llm.Usage, requests int) string {
-	if requests == 0 {
-		return "aucune requête"
+func usageLine(u llm.Usage, attempted int) string {
+	if attempted == 0 {
+		return "aucun appel"
 	}
 	if !u.Reported {
 		return "non communiqués par le fournisseur"
@@ -277,6 +291,32 @@ func usageLine(u llm.Usage, requests int) string {
 		s += fmt.Sprintf(" · %s lus en cache", thousands(int(u.CacheReadTokens)))
 	}
 	return s
+}
+
+// segmentsLine states what was actually translated. A run served entirely from
+// the cache has nothing to count, and "0 sur 0" would read as a failure.
+func segmentsLine(translated, total int) string {
+	if total == 0 {
+		return "aucun à traduire lors de cette passe"
+	}
+	return fmt.Sprintf("%d traduits sur %d", translated, total)
+}
+
+func requestsLine(requests, attempted int) string {
+	if attempted == 0 {
+		return "aucune — tout venait du cache de reprise"
+	}
+	if attempted == requests {
+		return fmt.Sprintf("%d", requests)
+	}
+	return fmt.Sprintf("%d réussies sur %d appels", requests, attempted)
+}
+
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func orDash(s string) string {
