@@ -261,6 +261,29 @@ régresser :
 Avant de toucher à ce fichier, consulter la compétence `claude-api` : les
 paramètres de l'API ont changé récemment et la mémoire du modèle est périmée.
 
+## Publication
+
+`.github/workflows/release.yml` compile et publie. Il se déclenche sur un tag
+`v*` ou à la main depuis l'onglet Actions, où la version est saisie et le tag
+créé par le workflow.
+
+La raison d'être de ce fichier : le jeton intégré à GitHub Actions a le droit
+de créer tags et releases, ce qu'un jeton d'application externe n'a en général
+pas. Publier depuis une session d'agent échoue en 403 sur `refs/tags/*` ; le
+workflow est le chemin qui fonctionne.
+
+Trois choses à ne pas défaire :
+
+- Les vérifications (`gofmt`, `go vet`, `go test -race`) tournent **avant** la
+  compilation. Une version ne se publie pas sur du code non vérifié.
+- Le nom des archives dit `macos`, pas `darwin`. `darwin` est le `GOOS` de Go,
+  exact mais illisible pour qui télécharge.
+- L'archive contient un binaire nommé simplement `tulipe`, pas le nom long de
+  l'archive : c'est ce qui est extrait et mis dans le `PATH`.
+
+Le projet est en Go pur sans cgo, donc un seul runner compile les trois cibles
+par compilation croisée ; inutile d'ouvrir une matrice de trois machines.
+
 ## Tests
 
 Les tests ne font aucun appel réseau vers l'extérieur ; `internal/llm` utilise

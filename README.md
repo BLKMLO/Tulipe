@@ -181,11 +181,42 @@ serait pire qu'aucun chiffre.
 
 ## Installation
 
+Chaque version publiée porte trois archives, une par système :
+
+| Fichier | Système |
+|---|---|
+| `tulipe-<version>-linux-amd64.tar.gz` | Linux x86-64 |
+| `tulipe-<version>-macos-amd64.tar.gz` | macOS (Intel, et Apple Silicon via Rosetta 2) |
+| `tulipe-<version>-windows-amd64.zip` | Windows x86-64 |
+
+Chacune contient un binaire unique nommé `tulipe`, à placer dans le `PATH`.
+Un fichier `SHA256SUMS` accompagne les archives pour vérification :
+
+```bash
+sha256sum -c SHA256SUMS --ignore-missing
+```
+
+Ou compiler depuis les sources — Go 1.24 ou plus récent, aucune autre
+dépendance système :
+
 ```bash
 go build -o tulipe ./cmd/tulipe
 ```
 
-Go 1.24 ou plus récent. Aucune autre dépendance système.
+## Publier une version
+
+Le workflow `.github/workflows/release.yml` s'en charge. Deux façons de le
+déclencher :
+
+- **Depuis l'interface GitHub** : onglet Actions → « Release » → « Run
+  workflow », saisir la version (`v0.1.0`). Le workflow crée le tag lui-même.
+- **En poussant un tag** : `git tag -a v0.1.0 -m "Tulipe v0.1.0" && git push
+  origin v0.1.0`.
+
+Dans les deux cas le workflow vérifie le formatage, `go vet` et les tests avec
+détecteur de course **avant** de compiler : une version ne part pas si le code
+n'est pas sain. Il compile ensuite les trois binaires, calcule leurs
+empreintes, et crée la release avec des notes engendrées à partir des commits.
 
 ## Options de `translate`
 
