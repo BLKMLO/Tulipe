@@ -655,3 +655,20 @@ func TestRetryPendingHonoursTheTitleSetting(t *testing.T) {
 		t.Errorf("output = %s", got)
 	}
 }
+
+func TestADocumentLevelNoteDoesNotClaimToBeAboutTheFirstParagraph(t *testing.T) {
+	// Segment zero is a real paragraph, so a note about the whole document
+	// cannot leave the field unset and hope for the best.
+	whole := docNote("ch1.xhtml", "le cache a refusé le document")
+	if strings.Contains(whole.String(), "0") {
+		t.Errorf("a document-level note names a segment: %s", whole)
+	}
+	if !strings.Contains(whole.String(), "ch1.xhtml") || !strings.Contains(whole.String(), "refusé") {
+		t.Errorf("note = %s", whole)
+	}
+
+	first := Note{Document: "ch1.xhtml", Segment: 0, Message: "vide"}
+	if !strings.Contains(first.String(), "0") {
+		t.Errorf("a note about the first paragraph must still name it: %s", first)
+	}
+}

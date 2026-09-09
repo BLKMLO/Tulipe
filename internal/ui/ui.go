@@ -620,7 +620,11 @@ func (m Model) startRun() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	opts := translate.BookOptions{Options: m.cfg.TranslateOptions(), RetryPending: m.retryOnly}
+	opts := translate.BookOptions{
+		Options:      m.cfg.TranslateOptions(),
+		RetryPending: m.retryOnly,
+		Salvage:      m.cfg.SalvagePass,
+	}
 	if m.cfg.Resume {
 		fp, err := translate.Fingerprint(m.bookPath)
 		if err == nil {

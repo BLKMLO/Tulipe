@@ -190,6 +190,12 @@ func settingsFields() []field {
 			set:  setBool(func(c *config.Config, b bool) { c.StructuredOutput = b }),
 		},
 		{
+			label: i18n.T("ui.field.salvage"), kind: fieldBool,
+			help: i18n.T("ui.field.salvage.help"),
+			get:  func(c config.Config) string { return boolLabel(c.SalvagePass) },
+			set:  setBool(func(c *config.Config, b bool) { c.SalvagePass = b }),
+		},
+		{
 			label: i18n.T("ui.field.resume"), kind: fieldBool,
 			help: i18n.T("ui.field.resume.help"),
 			get:  func(c config.Config) string { return boolLabel(c.Resume) },

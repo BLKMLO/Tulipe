@@ -42,11 +42,11 @@ func run(args []string) error {
 		case "translate":
 			return runTranslate(args[1:])
 		case "config":
-			return showConfig()
+			return showConfig(takeLang(args[1:]))
 		case "providers":
-			return showProviders()
+			return showProviders(takeLang(args[1:]))
 		case "models":
-			return showModels(args[1:])
+			return showModels(takeLang(args[1:]))
 		case "version", "--version", "-version":
 			fmt.Println("tulipe " + version)
 			return nil
@@ -78,7 +78,7 @@ func run(args []string) error {
 	return err
 }
 
-func showConfig() error {
+func showConfig(_ []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return err
@@ -107,6 +107,7 @@ func showConfig() error {
 	line("cli.config.timeout", i18n.T("cli.config.timeout.value", cfg.TimeoutSeconds))
 	line("cli.config.context", i18n.T("cli.config.context.value", cfg.ContextChars))
 	line("cli.config.resume", fmt.Sprintf("%v", cfg.Resume))
+	line("cli.config.salvage", fmt.Sprintf("%v", cfg.SalvagePass))
 	line("cli.config.titles", fmt.Sprintf("%v", cfg.TranslateTitles))
 	line("cli.config.about", orNone(cfg.About))
 	line("cli.config.format", cfg.Format)
@@ -130,7 +131,7 @@ func line(key, value string) {
 // showProviders prints the catalogue. It deliberately carries no quota or
 // pricing figures: those change often, and a stale number printed as fact would
 // mislead. Each entry points at the service's own page instead.
-func showProviders() error {
+func showProviders(_ []string) error {
 	cfg, _ := config.Load()
 	fmt.Println(i18n.T("cli.providers.title"))
 	fmt.Println()
@@ -213,6 +214,30 @@ func showModels(args []string) error {
 	return nil
 }
 
+// takeLang honours --lang on the commands that only print. They have no flag
+// set of their own, and silently ignoring the flag would answer in the wrong
+// language without saying why.
+func takeLang(args []string) []string {
+	rest := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		a := args[i]
+		switch {
+		case a == "--lang" || a == "-lang":
+			if i+1 < len(args) {
+				i++
+				i18n.SetLocale(args[i])
+			}
+		case strings.HasPrefix(a, "--lang="):
+			i18n.SetLocale(strings.TrimPrefix(a, "--lang="))
+		case strings.HasPrefix(a, "-lang="):
+			i18n.SetLocale(strings.TrimPrefix(a, "-lang="))
+		default:
+			rest = append(rest, a)
+		}
+	}
+	return rest
+}
+
 func orNone(s string) string {
 	if s == "" {
 		return i18n.T("ui.dash")
@@ -248,6 +273,7 @@ func translateFlags(cfg *config.Config, o *cliOptions) *flag.FlagSet {
 	fs.StringVar(&cfg.StyleNotes, "style", cfg.StyleNotes, i18n.T("cli.flag.style"))
 	fs.StringVar(&cfg.About, "about", cfg.About, i18n.T("cli.flag.about"))
 	fs.BoolVar(&cfg.TranslateTitles, "titles", cfg.TranslateTitles, i18n.T("cli.flag.titles"))
+	fs.BoolVar(&cfg.SalvagePass, "salvage", cfg.SalvagePass, i18n.T("cli.flag.salvage"))
 	fs.StringVar(&cfg.SourceCode, "from-code", cfg.SourceCode, i18n.T("cli.flag.from-code"))
 	fs.StringVar(&cfg.Format, "format", cfg.Format, i18n.T("cli.flag.format"))
 	fs.StringVar(&o.output, "o", "", i18n.T("cli.flag.output"))

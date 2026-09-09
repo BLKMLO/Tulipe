@@ -49,6 +49,14 @@ func (t *translator) systemPrompt() string {
 		b.WriteString(s)
 		b.WriteString("\n")
 	}
+
+	// The second pass says so, and says it last. Nothing here relaxes a rule
+	// or adds one: the checks the answer has to pass are the same either way.
+	// It restates the three the first answer most often broke, because the
+	// batch it is about to see is one that already came back unusable.
+	if t.opts.Salvage {
+		b.WriteString("\nThis batch was sent once already and the answer could not be used. Before answering, check three things: the array holds exactly one string per input segment, every tag and entity is reproduced character for character, and the reply is the JSON object and nothing else.\n")
+	}
 	return b.String()
 }
 
@@ -75,7 +83,11 @@ func (t *translator) userPrompt(payload string, n int) string {
 		fmt.Fprintf(&b, "\nFor continuity only — this is how the previous part ends in %s. Do not translate it and do not return it:\n%s\n", t.opts.TargetLanguage, tail)
 	}
 
-	fmt.Fprintf(&b, "\nTranslate these %d segments into %s. Answer with {\"translations\": [...]} holding exactly %d strings.\n\n", n, t.opts.TargetLanguage, n)
+	if t.opts.Salvage {
+		fmt.Fprintf(&b, "\nSecond attempt. Translate these %d segments into %s. Answer with {\"translations\": [...]} holding exactly %d strings, and nothing else.\n\n", n, t.opts.TargetLanguage, n)
+	} else {
+		fmt.Fprintf(&b, "\nTranslate these %d segments into %s. Answer with {\"translations\": [...]} holding exactly %d strings.\n\n", n, t.opts.TargetLanguage, n)
+	}
 	b.WriteString(payload)
 	return b.String()
 }

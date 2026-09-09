@@ -104,6 +104,12 @@ type Config struct {
 	// TimeoutSeconds caps one call to the model.
 	TimeoutSeconds int `json:"timeout_seconds"`
 
+	// SalvagePass retries, once the book is finished, the passages the first
+	// pass could not translate: smaller batches, a prompt that says as much.
+	// It is not part of Recipe — it changes how many passages come back, not
+	// what any one of them says, so turning it on must not throw away a cache.
+	SalvagePass bool `json:"salvage_pass"`
+
 	OutputDir string `json:"output_dir,omitempty"`
 	// Format is "epub" or "txt".
 	Format string `json:"format"`
@@ -120,6 +126,7 @@ func Default() Config {
 		Effort:           "medium",
 		StructuredOutput: true,
 		TranslateTitles:  true,
+		SalvagePass:      true,
 		TargetLanguage:   target.Name,
 		TargetCode:       target.Code,
 		ChunkChars:       4000,

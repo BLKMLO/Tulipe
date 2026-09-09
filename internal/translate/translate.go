@@ -73,6 +73,12 @@ type Options struct {
 	// value disables the guard.
 	StopAfterFailures int
 
+	// Salvage marks the second pass at passages the first one could not
+	// translate. It changes the prompt rather than the rules: the model is
+	// told the batch already came back unusable once, and the checks in
+	// accept are exactly the same. Callers set it through salvageOptions.
+	Salvage bool
+
 	// failures is shared by every document of one book, so the guard counts a
 	// broken service once rather than once per chapter. Book sets it; Document
 	// allocates its own when it is nil.
@@ -162,11 +168,22 @@ type DocMeta struct {
 // note saying so.
 type Note struct {
 	Document string
-	Segment  int
-	Message  string
+	// Segment is the paragraph the note is about, or -1 when it concerns the
+	// document as a whole. Zero is a real segment number, so the two cases
+	// cannot share it: docNote builds the second kind.
+	Segment int
+	Message string
+}
+
+// docNote is a note about a whole document rather than one of its paragraphs.
+func docNote(document, message string) Note {
+	return Note{Document: document, Segment: -1, Message: message}
 }
 
 func (n Note) String() string {
+	if n.Segment < 0 {
+		return i18n.T("translate.note.format-doc", n.Document, n.Message)
+	}
 	return i18n.T("translate.note.format", n.Document, n.Segment, n.Message)
 }
 

@@ -122,6 +122,19 @@ type BookOptions struct {
 	// language, instead of accepting a cached document as finished. Documents
 	// with nothing pending are still reused untouched.
 	RetryPending bool
+	// Salvage runs a second pass over the passages the first one left in the
+	// source language, once the whole book is done. See salvage.go for why it
+	// waits until then and what it does differently.
+	//
+	// It is deliberately absent from Recipe: it does not change what a
+	// translated passage comes out as, only how many of them there are, so
+	// turning it on must not throw away a cache.
+	Salvage bool
+	// Fallback is the provider the salvage pass asks instead of the main one.
+	// Nil, which is the usual case today, means the same provider tries again.
+	// A service that could not answer for a passage may well be the wrong one
+	// to ask twice, which is what this exists for.
+	Fallback llm.Provider
 }
 
 // Book translates every document of the book in place. The book is modified,
@@ -192,6 +205,12 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		})
 	}
 
+	// jobs collects the documents that came out of the first pass with
+	// passages still in the source language, along with the source bytes the
+	// second pass needs: book.Replace has by then put the translation in
+	// their place.
+	var jobs []salvageJob
+
 	var tail string
 	for i, name := range names {
 		if err := ctx.Err(); err != nil {
@@ -254,7 +273,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 					book.Replace(name, cached)
 					res.Documents[i].Status = StatusCached
 					res.Documents[i].Pending = len(pending)
-					res.Notes = append(res.Notes, Note{Document: name, Message: i18n.T("translate.note.retry-failed", err)})
+					res.Notes = append(res.Notes, docNote(name, i18n.T("translate.note.retry-failed", err)))
 					report(i, "", nil)
 					if ctx.Err() != nil {
 						return res, ctx.Err()
@@ -273,9 +292,12 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 				res.Documents[i].DoneSegments = len(pending)
 				res.Documents[i].TotalSegments = len(pending)
 				res.Documents[i].Pending = len(out.Pending)
+				if len(out.Pending) > 0 {
+					jobs = append(jobs, salvageJob{index: i, name: name, meta: meta, source: doc, pending: out.Pending})
+				}
 				storePending(opts.Cache, name, out.Pending)
 				if err := opts.Cache.Put(name, final); err != nil {
-					res.Notes = append(res.Notes, Note{Document: name, Message: i18n.T("translate.note.not-cached", err)})
+					res.Notes = append(res.Notes, docNote(name, i18n.T("translate.note.not-cached", err)))
 				}
 				report(i, "", nil)
 				continue
@@ -339,19 +361,30 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		res.Documents[i].DoneSegments = out.Segments
 		res.Documents[i].TotalSegments = out.Segments
 		res.Documents[i].Pending = len(out.Pending)
+		if len(out.Pending) > 0 {
+			jobs = append(jobs, salvageJob{index: i, name: name, meta: meta, source: doc, pending: out.Pending})
+		}
 
 		if opts.Cache != nil {
 			final, _ := book.Read(name)
 			storePending(opts.Cache, name, out.Pending)
 			if err := opts.Cache.Put(name, final); err != nil {
-				res.Notes = append(res.Notes, Note{Document: name, Message: i18n.T("translate.note.not-cached", err)})
+				res.Notes = append(res.Notes, docNote(name, i18n.T("translate.note.not-cached", err)))
 			}
 		}
 		report(i, "", nil)
 	}
 
+	if opts.Salvage {
+		if err := salvage(ctx, p, book, jobs, opts, res, report, func(u llm.Usage, req, att int) {
+			liveUsage, liveRequests, liveAttempted = u, req, att
+		}); err != nil {
+			return res, err
+		}
+	}
+
 	if err := book.SetLanguage(opts.TargetCode); err != nil {
-		res.Notes = append(res.Notes, Note{Document: book.OPFPath, Message: i18n.T("translate.note.language-kept", err)})
+		res.Notes = append(res.Notes, docNote(book.OPFPath, i18n.T("translate.note.language-kept", err)))
 	}
 	res.Duration = time.Since(started)
 	return res, nil
