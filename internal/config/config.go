@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -189,6 +190,10 @@ func (c Config) normalise() Config {
 	return c
 }
 
+// languageTag matches a BCP 47 tag closely enough to keep nonsense out of the
+// book's metadata, without pretending to be a full parser.
+var languageTag = regexp.MustCompile(`^[A-Za-z0-9]{1,8}(-[A-Za-z0-9]{1,8})*$`)
+
 // Validate refuses a configuration that cannot do what it says. Silently
 // falling back to a default would leave the user believing a setting took
 // effect when it did not.
@@ -239,6 +244,32 @@ func (c Config) Validate() error {
 	} {
 		if f.v < f.min {
 			return fmt.Errorf("%s vaut %d ; le minimum est %d", f.name, f.v, f.min)
+		}
+	}
+	// These go straight into every request. A caller is free to be generous,
+	// but an absurd value deserves a clear refusal here rather than a cryptic
+	// error from the service half a book later.
+	for _, field := range []struct {
+		name  string
+		value string
+		max   int
+	}{
+		{"--to", c.TargetLanguage, 100},
+		{"--from", c.SourceLanguage, 100},
+		{"--about", c.About, 2000},
+		{"--style", c.StyleNotes, 10000},
+		{"le glossaire", c.Glossary, 200000},
+	} {
+		if n := len([]rune(field.value)); n > field.max {
+			return fmt.Errorf("%s fait %d caractères ; le maximum est %d", field.name, n, field.max)
+		}
+	}
+	for _, tag := range []struct{ name, value string }{
+		{"--code", c.TargetCode},
+		{"--from-code", c.SourceCode},
+	} {
+		if tag.value != "" && !languageTag.MatchString(tag.value) {
+			return fmt.Errorf("%s vaut %q ; attendu une étiquette de langue comme fr, en-GB ou pt-BR", tag.name, tag.value)
 		}
 	}
 	if !slices.Contains(Formats, c.Format) {

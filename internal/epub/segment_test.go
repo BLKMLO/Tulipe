@@ -118,7 +118,8 @@ func TestApplyEscapesPlainTextButNotMarkup(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
 	}
-	want := `<html><body><div>a &amp; b &lt;c&gt;</div><p><em>d & e</em></p></body></html>`
+	// The bare "&" in the markup fragment is mended rather than dropped.
+	want := `<html><body><div>a &amp; b &lt;c&gt;</div><p><em>d &amp; e</em></p></body></html>`
 	if string(out) != want {
 		t.Errorf("Apply =\n%s\nwant\n%s", out, want)
 	}

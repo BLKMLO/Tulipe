@@ -261,3 +261,109 @@ func TestDeepLIsRecognisedAsADirectTranslator(t *testing.T) {
 		t.Error("DeepL must be reached through the direct-translation path, not through prompting")
 	}
 }
+
+func TestValidateRejectsMalformedLanguageTags(t *testing.T) {
+	// The code lands in the book's metadata; nonsense there makes a file no
+	// reader will open.
+	for _, bad := range []string{"fr<script>", "fr&amp;", "f r", "fr_FR!", "-fr", "fr-", "fr--FR", "«fr»"} {
+		cfg := Default()
+		cfg.TargetCode = bad
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("--code %q accepté, want a refusal", bad)
+		}
+	}
+	for _, good := range []string{"fr", "en-GB", "pt-BR", "zh-Hans", "sr-Latn-RS", ""} {
+		cfg := Default()
+		cfg.TargetCode = good
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("--code %q refusé : %v", good, err)
+		}
+	}
+	// The source side is checked the same way.
+	cfg := Default()
+	cfg.SourceCode = "en<>"
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "--from-code") {
+		t.Errorf("Validate = %v, want a complaint about --from-code", err)
+	}
+}
+
+// TestValidateNeverPanics throws every awkward value at the validator at once:
+// a user can combine them freely, and no combination may bring the program
+// down.
+func TestValidateNeverPanics(t *testing.T) {
+	odd := []string{"", " ", "\n", "\x00", strings.Repeat("x", 5000), "«»", "../../etc/passwd",
+		"http://", "://x", "%%", "-1", "0", "NaN", "🌷"}
+	numbers := []int{-1 << 40, -1, 0, 1, 1 << 40}
+
+	for _, s := range odd {
+		for _, n := range numbers {
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Fatalf("chaîne %q, nombre %d : %v", s, n, r)
+					}
+				}()
+				cfg := Default()
+				cfg.Provider, cfg.Model, cfg.BaseURL = s, s, s
+				cfg.Effort, cfg.Format, cfg.OutputDir = s, s, s
+				cfg.TargetLanguage, cfg.TargetCode, cfg.SourceCode = s, s, s
+				cfg.Glossary, cfg.StyleNotes, cfg.About, cfg.APIKey = s, s, s, s
+				cfg.ChunkChars, cfg.MaxSegments, cfg.Attempts = n, n, n
+				cfg.ContextChars, cfg.TimeoutSeconds = n, n
+				cfg.MaxTokens = int64(n)
+
+				_ = cfg.Validate()
+				_ = cfg.Kind()
+				_ = cfg.Endpoint()
+				_ = cfg.KeyStatus()
+				_ = cfg.Recipe()
+				_ = cfg.TranslateOptions()
+				_, _ = cfg.NewProvider()
+				_ = cfg.normalise()
+			}()
+		}
+	}
+}
+
+func TestNormaliseAlwaysProducesAValidConfiguration(t *testing.T) {
+	// Whatever a hand-edited file holds, the defaults must fill the gaps.
+	for _, n := range []int{-1 << 40, -1, 0} {
+		cfg := Config{ChunkChars: n, MaxSegments: n, Attempts: n, ContextChars: n,
+			TimeoutSeconds: n, MaxTokens: int64(n)}.normalise()
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("une configuration normalisée depuis %d reste invalide : %v", n, err)
+		}
+	}
+}
+
+func TestValidateCapsFreeTextFields(t *testing.T) {
+	// Every one of these is copied into each request; an absurd length must be
+	// named here rather than surface as a service error mid-book.
+	cases := map[string]func(*Config, string){
+		"--to":         func(c *Config, v string) { c.TargetLanguage = v },
+		"--from":       func(c *Config, v string) { c.SourceLanguage = v },
+		"--about":      func(c *Config, v string) { c.About = v },
+		"--style":      func(c *Config, v string) { c.StyleNotes = v },
+		"le glossaire": func(c *Config, v string) { c.Glossary = v },
+	}
+	for name, set := range cases {
+		cfg := Default()
+		set(&cfg, strings.Repeat("é", 300000))
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("%s : une valeur de 300 000 caractères est acceptée", name)
+			continue
+		}
+		if !strings.Contains(err.Error(), name) {
+			t.Errorf("%s : le message ne nomme pas le champ : %v", name, err)
+		}
+	}
+
+	// Ordinary values stay accepted.
+	cfg := Default()
+	cfg.About = "un roman noir new-yorkais des années 1950"
+	cfg.Glossary = strings.Repeat("Victory Mansions = Maison de la Victoire\n", 500)
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("une configuration raisonnable est refusée : %v", err)
+	}
+}

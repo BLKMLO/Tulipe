@@ -128,6 +128,11 @@ func (m Model) viewRun() string {
 	var b strings.Builder
 	b.WriteString(header("traduction en cours") + "\n\n")
 
+	if m.run == nil {
+		b.WriteString(dimStyle.Render("aucune traduction en cours"))
+		return b.String() + "\n\n" + help("échap", "retour")
+	}
+
 	docs := m.run.progress.Documents
 	done := 0
 	for _, d := range docs {

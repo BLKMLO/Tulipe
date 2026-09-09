@@ -387,7 +387,12 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case screenBook:
 		return m.updateBook(msg)
 	case screenRun:
-		if msg.String() == "esc" && m.run != nil {
+		if m.run == nil {
+			// Nothing is running: the screen is a leftover, let it be left.
+			m.screen = screenMenu
+			return m, nil
+		}
+		if msg.String() == "esc" {
 			m.run.cancel()
 			m.run.appendLog(warnStyle.Render("annulation demandée…"))
 		}
@@ -474,6 +479,10 @@ func (m Model) updateBook(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateResume(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// A list can shrink under the cursor — a deleted entry, a reload that
+	// returns fewer. Clamping here means no branch below has to remember.
+	m.runsIndex = clampIndex(m.runsIndex, len(m.runs))
+
 	switch msg.String() {
 	case "esc":
 		m.screen = screenMenu
@@ -504,6 +513,20 @@ func (m Model) updateResume(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Batch(m.spin.Tick, loadBook(r.Source))
 	}
 	return m, nil
+}
+
+// clampIndex keeps a selection inside a list, and returns 0 for an empty one.
+func clampIndex(i, length int) int {
+	if length <= 0 {
+		return 0
+	}
+	if i < 0 {
+		return 0
+	}
+	if i >= length {
+		return length - 1
+	}
+	return i
 }
 
 func (s *runState) appendLog(line string) {
@@ -565,12 +588,21 @@ func (m Model) bookTitle() string {
 // startRun kicks off the translation in a goroutine and switches to the live
 // progress screen.
 func (m Model) startRun() (tea.Model, tea.Cmd) {
+	if m.book == nil || m.bookPath == "" {
+		m.failure = "aucun livre n'est chargé"
+		m.screen = screenMenu
+		return m, nil
+	}
 	if err := m.cfg.Validate(); err != nil {
 		m.failure = err.Error()
 		return m, nil
 	}
 	provider, err := m.cfg.NewProvider()
 	if err != nil {
+		m.failure = err.Error()
+		return m, nil
+	}
+	if err := checkWritable(m.outPath); err != nil {
 		m.failure = err.Error()
 		return m, nil
 	}
@@ -634,6 +666,30 @@ func writeBook(book *epub.Book, path, format string) (string, error) {
 		return "", err
 	}
 	return final, nil
+}
+
+// checkWritable proves the destination can be written before a single token is
+// spent. Discovering a bad path after translating three hundred pages would be
+// the worst possible moment.
+func checkWritable(path string) error {
+	if info, err := os.Stat(path); err == nil && info.IsDir() {
+		return fmt.Errorf("%s est un dossier ; indiquez un nom de fichier", path)
+	}
+	dir := filepath.Dir(path)
+	info, err := os.Stat(dir)
+	if err != nil {
+		return fmt.Errorf("dossier de sortie inaccessible : %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("%s n'est pas un dossier", dir)
+	}
+	probe, err := os.CreateTemp(dir, ".tulipe-*")
+	if err != nil {
+		return fmt.Errorf("écriture impossible dans %s : %w", dir, err)
+	}
+	name := probe.Name()
+	probe.Close()
+	return os.Remove(name)
 }
 
 func freeName(path string) string {

@@ -26,6 +26,12 @@ import (
 // MediaTypeXHTML is the media type every EPUB content document must declare.
 const MediaTypeXHTML = "application/xhtml+xml"
 
+// MaxUncompressedSize caps what a single archive may expand to. A book is a few
+// megabytes; a zip crafted to expand to gigabytes would otherwise exhaust the
+// machine's memory before anything noticed. It is a variable so that tests can
+// exercise the limit without building half a gigabyte.
+var MaxUncompressedSize int64 = 512 << 20 // 512 MiB
+
 // File is a single entry of the EPUB zip archive.
 type File struct {
 	Name     string
@@ -117,6 +123,7 @@ func Parse(data []byte) (*Book, error) {
 		return nil, fmt.Errorf("ce fichier n'est pas une archive zip lisible : %w", err)
 	}
 	b := &Book{index: map[string]int{}}
+	var total int64
 	for _, f := range zr.File {
 		if f.FileInfo().IsDir() {
 			continue
@@ -125,10 +132,17 @@ func Parse(data []byte) (*Book, error) {
 		if err != nil {
 			return nil, fmt.Errorf("ouverture de %s : %w", f.Name, err)
 		}
-		content, err := io.ReadAll(rc)
+		// Read one byte past the remaining budget so an oversized entry is
+		// caught rather than silently truncated.
+		remaining := MaxUncompressedSize - total
+		content, err := io.ReadAll(io.LimitReader(rc, remaining+1))
 		rc.Close()
 		if err != nil {
 			return nil, fmt.Errorf("lecture de %s : %w", f.Name, err)
+		}
+		total += int64(len(content))
+		if total > MaxUncompressedSize {
+			return nil, fmt.Errorf("archive trop volumineuse : elle dépasse %d Mio une fois décompressée", MaxUncompressedSize>>20)
 		}
 		b.index[f.Name] = len(b.Files)
 		b.Files = append(b.Files, File{
@@ -390,7 +404,7 @@ func (b *Book) SetLanguage(code string) error {
 	var out bytes.Buffer
 	prev := 0
 	for _, s := range spans {
-		start, end, replacement := s.rewriteText(raw, code)
+		start, end, replacement := s.rewriteText(raw, xmlTextEscape(code))
 		if start < prev {
 			continue
 		}

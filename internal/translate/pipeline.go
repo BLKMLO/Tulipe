@@ -126,6 +126,12 @@ type BookOptions struct {
 // Book translates every document of the book in place. The book is modified,
 // not written: the caller decides where the result goes.
 func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions, onProgress func(Progress)) (*Result, error) {
+	if book == nil {
+		return nil, errors.New("aucun livre à traduire")
+	}
+	if p == nil {
+		return nil, errors.New("aucun service de traduction configuré")
+	}
 	opts.Options = opts.Options.Defaults()
 	started := time.Now()
 
