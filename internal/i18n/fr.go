@@ -214,15 +214,17 @@ var messagesFR = map[string]string{
 	"ui.report.notes.detail":    " — le texte source a été conservé là où la traduction n'était pas exploitable",
 
 	// -- internal/ui : chiffres ------------------------------------------
-	"ui.usage.no-call":      "aucun appel",
-	"ui.usage.not-reported": "non communiqués par le fournisseur",
-	"ui.usage.in-out":       "%s entrants · %s sortants",
-	"ui.usage.cache-read":   " · %s lus en cache",
-	"ui.usage.in-out.plain": "%d entrants, %d sortants",
-	"ui.segments.none":      "aucun à traduire lors de cette passe",
-	"ui.segments.count":     "%d traduits sur %d",
-	"ui.requests.none":      "aucune — tout venait du cache de reprise",
-	"ui.requests.mixed":     "%d réussies sur %d appels",
+	"ui.usage.no-call":              "aucun appel",
+	"ui.usage.not-reported":         "non communiqués par le fournisseur",
+	"ui.usage.in-out":               "%s entrants · %s sortants",
+	"ui.usage.cache-read":           " · %s lus en cache",
+	"ui.usage.in-out.plain":         "%d entrants, %d sortants",
+	"ui.segments.none":              "aucun à traduire lors de cette passe",
+	"ui.segments.count":             "%d traduits sur %d",
+	"translate.note.second-attempt": "seconde tentative : %s",
+	"ui.requests.nothing-to-do":     "aucune — il n'y avait rien à traduire",
+	"ui.requests.none":              "aucune — tout venait du cache de reprise",
+	"ui.requests.mixed":             "%d réussies sur %d appels",
 
 	// -- internal/ui : écran de reprise ----------------------------------
 	"ui.resume.title":   "traductions reprenables",

@@ -427,25 +427,32 @@ func (m *Model) cycleChoice(fd field, step int) {
 	f.dirty = true
 }
 
-// settingsChrome is how many lines the settings screen spends on everything
-// that is not a field: the header, the help panel under the list, the unsaved
-// marker and the key hints.
-const settingsChrome = 13
-
 func (m Model) viewSettings() string {
 	f := m.settings
-	var b strings.Builder
-	b.WriteString(header(i18n.T("ui.settings.title")) + "\n\n")
-
 	vis := f.visible()
 	column := f.labelColumn()
-	// The list is windowed to what the terminal can actually show. Rendering
-	// every field and letting the terminal scroll away the top is what forced
-	// people to resize their window to reach the last setting.
-	rows := m.listRows(settingsChrome)
-	start := clamp(f.index-rows/2, 0, max(0, len(vis)-rows))
-	end := min(len(vis), start+rows)
 
+	head := header(i18n.T("ui.settings.title")) + "\n"
+
+	// The chrome is measured, not assumed. Its height depends on the help of
+	// whichever field is selected, on how that help wraps at this width, and
+	// on the language it is written in — a constant is right for one of those
+	// and wrong for the next one added. Getting it wrong pushes the bottom of
+	// the list off the screen, which is the whole thing this window exists to
+	// prevent.
+	foot := m.settingsFoot(true)
+	rows := m.rows() - lipgloss.Height(head) - lipgloss.Height(foot)
+	if rows < minListRows {
+		// On a very short terminal something has to go, and it is the help
+		// text: the reader came here for the settings, and the sentence
+		// explaining one of them is worth less than seeing three of them.
+		foot = m.settingsFoot(false)
+		rows = m.rows() - lipgloss.Height(head) - lipgloss.Height(foot)
+	}
+	start, end := window(f.index, len(vis), max(minListRows, rows))
+
+	var b strings.Builder
+	b.WriteString(head)
 	if start > 0 {
 		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-above", start)) + "\n")
 	}
@@ -474,21 +481,29 @@ func (m Model) viewSettings() string {
 	if end < len(vis) {
 		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-below", len(vis)-end)) + "\n")
 	}
+	b.WriteString(foot)
+	return b.String()
+}
 
-	if len(vis) > 0 {
-		fd := f.fields[vis[f.index]]
-		if fd.help != "" {
-			b.WriteString("\n" + panelStyle.Render(dimStyle.Render(wrap(fd.help, clamp(m.width-8, 40, 96)))))
+// settingsFoot is everything below the list: the help of the selected field,
+// the unsaved marker, and the key hints. It is built separately from the list
+// so that its height can be measured before the list is sized.
+func (m Model) settingsFoot(withHelp bool) string {
+	f := m.settings
+	var b strings.Builder
+
+	if vis := f.visible(); withHelp && len(vis) > 0 {
+		if fd := f.fields[vis[f.index]]; fd.help != "" {
+			b.WriteString("\n" + panelStyle.Render(dimStyle.Render(wrap(fd.help, m.panelWidth()))))
 		}
 	}
-
 	if f.dirty {
 		b.WriteString("\n\n" + warnStyle.Render(i18n.T("ui.settings.unsaved")))
 	}
 	if f.editing {
-		b.WriteString("\n\n" + help(i18n.T("ui.key.enter"), i18n.T("ui.act.confirm"), i18n.T("ui.key.esc"), i18n.T("ui.act.cancel-edit")))
+		b.WriteString("\n\n" + m.help(i18n.T("ui.key.enter"), i18n.T("ui.act.confirm"), i18n.T("ui.key.esc"), i18n.T("ui.act.cancel-edit")))
 	} else {
-		b.WriteString("\n\n" + help(
+		b.WriteString("\n\n" + m.help(
 			i18n.T("ui.key.up-down"), i18n.T("ui.act.field"),
 			"←/→", i18n.T("ui.act.change"),
 			i18n.T("ui.key.enter"), i18n.T("ui.act.edit"),

@@ -326,6 +326,13 @@ func (t *translator) emit(msg string, retry *llm.RetryNotice) {
 // pass i18n.T(key, ...), not a format string, so that nothing here has to know
 // which language the sentence came out in.
 func (t *translator) note(idx int, msg string) {
+	if t.opts.Salvage {
+		// The first pass already reported this passage. Repeating the same
+		// sentence would read as a second, different problem: the report
+		// would count six where three paragraphs are stuck, and contradict
+		// the pending line right above it.
+		msg = i18n.T("translate.note.second-attempt", msg)
+	}
 	t.res.Notes = append(t.res.Notes, Note{
 		Document: t.name,
 		Segment:  t.segmentNumber(idx),

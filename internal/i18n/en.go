@@ -214,15 +214,17 @@ var messagesEN = map[string]string{
 	"ui.report.notes.detail":    " — the source text was kept wherever the translation was unusable",
 
 	// -- internal/ui: figures --------------------------------------------
-	"ui.usage.no-call":      "no call",
-	"ui.usage.not-reported": "not reported by the provider",
-	"ui.usage.in-out":       "%s in · %s out",
-	"ui.usage.cache-read":   " · %s read from cache",
-	"ui.usage.in-out.plain": "%d in, %d out",
-	"ui.segments.none":      "none to translate in this pass",
-	"ui.segments.count":     "%d translated out of %d",
-	"ui.requests.none":      "none — everything came from the resume cache",
-	"ui.requests.mixed":     "%d successful out of %d calls",
+	"ui.usage.no-call":              "no call",
+	"ui.usage.not-reported":         "not reported by the provider",
+	"ui.usage.in-out":               "%s in · %s out",
+	"ui.usage.cache-read":           " · %s read from cache",
+	"ui.usage.in-out.plain":         "%d in, %d out",
+	"ui.segments.none":              "none to translate in this pass",
+	"ui.segments.count":             "%d translated out of %d",
+	"translate.note.second-attempt": "second attempt: %s",
+	"ui.requests.nothing-to-do":     "none — nothing needed translating",
+	"ui.requests.none":              "none — everything came from the resume cache",
+	"ui.requests.mixed":             "%d successful out of %d calls",
 
 	// -- internal/ui: resume screen --------------------------------------
 	"ui.resume.title":   "resumable translations",

@@ -2,11 +2,15 @@ package ui
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/blkmlo/tulipe/internal/config"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/translate"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // everyKey is the alphabet a user can actually produce, plus the special keys
@@ -221,4 +225,118 @@ func TestOutOfOrderMessagesDoNotCrash(t *testing.T) {
 		}
 	}
 	_ = config.Default
+}
+
+// terminalSizes are the shapes a screen has to survive. 60x14 is a split pane,
+// which is small but real; 40x10 is smaller than any fixed panel can be, and is
+// here to prove nothing runs off the right edge even then.
+var terminalSizes = []struct{ w, h int }{{40, 10}, {60, 14}, {80, 24}, {100, 30}, {120, 40}, {200, 50}}
+
+// viewSize measures a rendered view the way a terminal sees it.
+func viewSize(view string) (lines, columns int) {
+	view = strings.TrimRight(view, "\n")
+	for _, l := range strings.Split(view, "\n") {
+		lines++
+		if w := lipgloss.Width(l); w > columns {
+			columns = w
+		}
+	}
+	return lines, columns
+}
+
+func TestNoScreenRunsPastTheRightEdge(t *testing.T) {
+	// A line wider than the terminal is not only ugly: the terminal wraps it,
+	// and the rows it takes are rows the screen was counting on. Every height
+	// budget below depends on this holding first.
+	defer i18n.SetLocale(i18n.DefaultLocale)
+	for _, code := range i18n.Locales {
+		i18n.SetLocale(code)
+		for _, size := range terminalSizes {
+			for name, base := range everyScreen(t) {
+				mm, _ := base.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
+				m := mm.(Model)
+				if _, columns := viewSize(m.View()); columns > size.w {
+					t.Errorf("%s %s at %dx%d: %d columns wide",
+						code, name, size.w, size.h, columns)
+				}
+			}
+		}
+	}
+}
+
+func TestTheScrollingScreensFitTheTerminal(t *testing.T) {
+	// The settings and model screens are the ones that window their list, so
+	// they are the ones that must always fit: that is what the window is for.
+	// Every field is selected in turn, because the height of a screen depends
+	// on the help text of whichever one is — which is exactly what a constant
+	// chrome got wrong.
+	defer i18n.SetLocale(i18n.DefaultLocale)
+	for _, code := range i18n.Locales {
+		i18n.SetLocale(code)
+		for _, size := range terminalSizes {
+			cfg := config.Default()
+			cfg.Language = code
+			m := New(cfg, "")
+			mm, _ := m.Update(tea.WindowSizeMsg{Width: size.w, Height: size.h})
+			m = mm.(Model)
+			m.screen = screenSettings
+
+			for i := range m.settings.fields {
+				m.settings.index = clampIndex(i, len(m.settings.visible()))
+				lines, columns := viewSize(m.View())
+				label := m.settings.fields[m.settings.visible()[m.settings.index]].label
+				if lines > size.h {
+					t.Errorf("%s settings at %dx%d on %q: %d lines",
+						code, size.w, size.h, label, lines)
+				}
+				if columns > size.w {
+					t.Errorf("%s settings at %dx%d on %q: %d columns",
+						code, size.w, size.h, label, columns)
+				}
+			}
+
+			m.screen = screenModels
+			m.models = make([]string, 200)
+			for i := range m.models {
+				m.models[i] = strings.Repeat("m", 40) + strconv.Itoa(i)
+			}
+			for _, idx := range []int{0, 1, 99, 198, 199} {
+				m.modelsIndex = idx
+				if lines, columns := viewSize(m.View()); lines > size.h || columns > size.w {
+					t.Errorf("%s models at %dx%d index %d: %d lines, %d columns",
+						code, size.w, size.h, idx, lines, columns)
+				}
+			}
+		}
+	}
+}
+
+func TestWindowCountsItsOwnMarkers(t *testing.T) {
+	// A list that does not fit draws "n more above" and "n more below", and
+	// those are rows like any other. Leaving them out of the budget is what
+	// pushed the bottom of a screen out of sight.
+	for _, budget := range []int{1, 2, 3, 5, 10, 40} {
+		for _, total := range []int{0, 1, 3, 7, 100} {
+			for _, cursor := range []int{0, total / 2, total - 1} {
+				start, end := window(cursor, total, budget)
+				if start < 0 || end > total || start > end {
+					t.Fatalf("window(%d,%d,%d) = %d,%d is not a slice", cursor, total, budget, start, end)
+				}
+				height := end - start
+				if start > 0 {
+					height++
+				}
+				if end < total {
+					height++
+				}
+				if height > budget && budget >= minListRows {
+					t.Errorf("window(%d,%d,%d) needs %d rows of a %d budget",
+						cursor, total, budget, height, budget)
+				}
+				if total > 0 && end == start {
+					t.Errorf("window(%d,%d,%d) shows nothing", cursor, total, budget)
+				}
+			}
+		}
+	}
 }
