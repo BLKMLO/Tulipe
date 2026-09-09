@@ -2,16 +2,16 @@
 
 # 🌷 Tulipe
 
-**Traduisez un livre entier dans une autre langue — sans l'abîmer.**
+**Translate an entire book into another language — without breaking it.**
 
-Tulipe prend un EPUB, le fait traduire chapitre par chapitre par le modèle d'IA
-de votre choix, et vous rend un livre qui s'ouvre exactement comme l'original :
-même mise en page, mêmes images, même table des matières. Seule la langue a
-changé.
+Tulipe takes an EPUB, has it translated chapter by chapter by the AI model of
+your choice, and hands you back a book that opens exactly like the original:
+same layout, same images, same table of contents. Only the language has
+changed.
 
-[Télécharger](https://github.com/BLKMLO/Tulipe/releases/latest) ·
-[Premiers pas](#premiers-pas) ·
-[Services acceptés](#choisir-un-service)
+[Download](https://github.com/BLKMLO/Tulipe/releases/latest) ·
+[Getting started](#getting-started) ·
+[Supported services](#choosing-a-service)
 
 </div>
 
@@ -34,71 +34,75 @@ changé.
 échap annuler (le travail déjà fait est conservé)
 ```
 
-## Pourquoi Tulipe
+*Tulipe's interface currently speaks French only — the screenshots in this
+document are real program output. An English UI may follow.*
 
-**Votre livre ressort intact.** Tulipe ne demande jamais au modèle de réécrire
-vos fichiers : il repère les passages de prose, les fait traduire, et les
-remet exactement à leur place. Tout le reste — mise en forme, images, notes de
-bas de page, liens — n'est même pas touché.
+## Why Tulipe
 
-**Vous choisissez qui traduit.** Treize services, dont plusieurs proposent une
-offre gratuite : Google AI Studio, Mistral, Groq, Cerebras, NVIDIA, Cohere,
-Cloudflare. Ou Claude, ou DeepL. Ou un modèle qui tourne sur votre machine,
-auquel cas votre livre ne quitte jamais votre ordinateur.
+**Your book comes out intact.** Tulipe never asks the model to rewrite your
+files: it finds the passages of prose, has them translated, and puts them back
+exactly where they were. Everything else — formatting, images, footnotes,
+links — isn't even touched.
 
-**Une interruption ne coûte rien.** Coupure réseau, fenêtre fermée, quota
-atteint : relancez, Tulipe reprend au chapitre suivant. Vous ne repayez jamais
-un chapitre déjà traduit.
+**You choose who translates.** Thirteen services, several with a free tier:
+Google AI Studio, Mistral, Groq, Cerebras, NVIDIA, Cohere, Cloudflare. Or
+Claude, or DeepL. Or a model running on your own machine, in which case your
+book never leaves your computer.
 
-**Aucun échec silencieux.** Si un passage n'a pas pu être traduit, il reste en
-langue d'origine, Tulipe vous le dit et vous propose de le reprendre — sans
-repayer le chapitre. Vous ne découvrirez pas au chapitre 12 qu'une clé
-invalide vous a rendu une copie de l'original.
+**An interruption costs nothing.** Network drop, closed window, quota hit:
+just run it again, Tulipe resumes at the next chapter. You never pay twice for
+a chapter already translated.
+
+**No silent failure.** If a passage couldn't be translated, it stays in the
+original language, Tulipe tells you, and offers to retry it — without
+re-paying for the chapter. You won't discover at chapter 12 that an invalid
+key handed you a copy of the original.
 
 ## Installation
 
-Téléchargez l'archive de votre système depuis la
-[dernière version](https://github.com/BLKMLO/Tulipe/releases/latest), extrayez
-le fichier `tulipe` qu'elle contient, et placez-le où vous voulez.
+Download the archive for your system from the
+[latest release](https://github.com/BLKMLO/Tulipe/releases/latest), extract
+the `tulipe` file it contains, and put it wherever you like.
 
-| Votre système | Fichier à prendre |
+| Your system | File to grab |
 |---|---|
 | Linux | `tulipe-…-linux-amd64.tar.gz` |
 | macOS | `tulipe-…-macos-amd64.tar.gz` |
 | Windows | `tulipe-…-windows-amd64.zip` |
 
-Un fichier `SHA256SUMS` accompagne les archives si vous voulez vérifier ce que
-vous avez téléchargé :
+A `SHA256SUMS` file ships alongside the archives if you want to verify what
+you downloaded:
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-Ou compilez depuis les sources — il suffit de Go 1.24, rien d'autre :
+Or build from source — all you need is Go 1.24, nothing else:
 
 ```bash
 go build -o tulipe ./cmd/tulipe
 ```
 
-## Premiers pas
+## Getting started
 
-**1. Obtenez une clé.** Chez le service de votre choix — `tulipe providers`
-liste les treize, avec un lien vers la page où l'on récupère une clé et le nom
-de la variable où la ranger. Plusieurs n'exigent pas de carte bancaire.
+**1. Get a key.** From whichever service you choose — `tulipe providers`
+lists all thirteen, each with a link to where you get a key and the name of
+the variable to store it in. Several don't require a credit card.
 
 ```bash
-export GROQ_API_KEY=votre_clé
+export GROQ_API_KEY=your_key
 ```
 
-**2. Lancez Tulipe.**
+**2. Launch Tulipe.**
 
 ```bash
 tulipe
 ```
 
-Un menu s'ouvre. « Réglages » pour choisir le service, la langue et le modèle
-(la touche `m` demande au service la liste de ses modèles). « Tester la
-connexion » vérifie que tout répond. Puis « Traduire un EPUB ».
+A menu opens. "Réglages" (Settings) lets you pick the service, language and
+model — the `m` key asks the service for its list of models. "Tester la
+connexion" (Test the connection) checks that everything responds. Then
+"Traduire un EPUB" (Translate an EPUB).
 
 ```
 🌷 Tulipe  ·  traduction d'EPUB, chapitre par chapitre
@@ -116,84 +120,85 @@ connexion » vérifie que tout répond. Puis « Traduire un EPUB ».
 ↑/↓ naviguer  •  entrée choisir  •  q quitter
 ```
 
-**3. Récupérez votre livre.** Il apparaît à côté de l'original, avec la langue
-dans son nom : `mon-livre.fr.epub`. L'original n'est jamais modifié, et un
-fichier existant n'est jamais écrasé.
+**3. Get your book back.** It shows up next to the original, with the
+language in its name: `my-book.fr.epub`. The original is never modified, and
+an existing file is never overwritten.
 
-## En ligne de commande
+## Command line
 
-Pour traiter plusieurs livres, ou automatiser :
+For processing several books, or automating things:
 
 ```bash
-# le cas courant
-tulipe translate --to français --code fr mon-livre.epub
+# the common case
+tulipe translate --to French --code fr my-book.epub
 
-# avec un service gratuit, et un glossaire pour tenir les noms propres
-tulipe models --provider groq          # pour connaître les modèles proposés
-tulipe translate --provider groq --model «le modèle choisi» \
-                 --to français --code fr \
-                 --glossary-file noms-propres.txt mon-livre.epub
+# with a free service, and a glossary to keep proper nouns straight
+tulipe models --provider groq          # see what models it offers
+tulipe translate --provider groq --model <the model you picked> \
+                 --to French --code fr \
+                 --glossary-file proper-nouns.txt my-book.epub
 
-# en texte brut plutôt qu'en EPUB
-tulipe translate --to français --code fr --format txt mon-livre.epub
+# plain text instead of EPUB
+tulipe translate --to French --code fr --format txt my-book.epub
 
-# sur votre machine : rien ne sort de l'ordinateur
-tulipe translate --provider ollama --model «votre modèle local» \
-                 --to français --code fr mon-livre.epub
+# on your machine: nothing leaves your computer
+tulipe translate --provider ollama --model <your local model> \
+                 --to French --code fr my-book.epub
 ```
 
-Le programme rend `0` quand le livre est entièrement traduit, `1` sinon — et
-dans ce cas il écrit quand même le fichier, en vous nommant ce qui manque.
+The program returns `0` when the book is fully translated, `1` otherwise —
+and in that case it still writes the file, naming what's missing.
 
-## Choisir un service
+## Choosing a service
 
-`tulipe providers` affiche la liste complète avec, pour chacun, l'adresse, la
-variable d'environnement attendue et le lien vers sa page d'inscription.
+`tulipe providers` shows the full list, and for each one its address, the
+expected environment variable, and a link to its sign-up page.
 
 | | Services |
 |---|---|
-| **Offre gratuite annoncée** | Google AI Studio (Gemini), Mistral, Groq, Cerebras, NVIDIA NIM, Cohere, Cloudflare Workers AI |
-| **Sur votre machine** | Ollama, LM Studio |
-| **Autres** | Claude, OpenAI, OpenRouter, DeepL |
+| **Advertises a free tier** | Google AI Studio (Gemini), Mistral, Groq, Cerebras, NVIDIA NIM, Cohere, Cloudflare Workers AI |
+| **On your machine** | Ollama, LM Studio |
+| **Others** | Claude, OpenAI, OpenRouter, DeepL |
 
-Les conditions de chaque offre gratuite sont sur le site du service. Tulipe
-n'en garde aucune copie : ces limites changent trop souvent pour qu'un chiffre
-inscrit ici soit encore vrai quand vous le lirez.
+The terms of each free tier live on the service's own site. Tulipe keeps no
+copy of them: those limits change too often for a number written here to
+still be true by the time you read it.
 
-Même remarque pour les modèles : Tulipe ne contient aucune liste. `tulipe
-models` interroge le service, ce qui vous donne des noms exacts et à jour.
+Same goes for models: Tulipe ships no list. `tulipe models` asks the service
+directly, which gives you exact, current names.
 
 ```bash
 tulipe models --provider groq
 ```
 
-**DeepL** fonctionne un peu différemment des autres. Ce n'est pas un modèle
-qu'on instruit, mais un traducteur : on lui passe le texte, il rend le texte.
-En pratique c'est plus fiable, mais le glossaire et les consignes de style ne
-s'y appliquent pas — ce sont des instructions, et DeepL n'en prend pas.
+**DeepL** works a bit differently from the rest. It isn't a model you
+instruct, but a translator: you hand it text, it hands back text. In practice
+this is more reliable, but the glossary and style notes don't apply to it —
+those are instructions, and DeepL doesn't take any.
 
-### Votre clé reste chez vous
+### Your key stays with you
 
-Tulipe cherche la clé dans les variables d'environnement avant de regarder son
-fichier de configuration. Une clé rangée dans une variable ne touche donc
-jamais le disque. Si vous préférez la stocker, le fichier est créé en `0600` et
-la clé n'est jamais affichée ni écrite dans un journal.
+Tulipe looks for the key in environment variables before checking its
+configuration file. A key kept in a variable therefore never touches disk. If
+you'd rather store it, the file is created with `0600` permissions and the
+key is never displayed or written to a log.
 
-## Deux formats de sortie
+## Two output formats
 
-**EPUB** (par défaut) : un vrai livre, identique à l'original hormis la langue.
+**EPUB** (default): a real book, identical to the original except for the
+language.
 
-**Texte brut** (`--format txt`) : la prose seule, chapitre après chapitre, sans
-balise. Pratique pour relire, comparer deux traductions, ou passer le texte à
-un autre outil.
+**Plain text** (`--format txt`): the prose alone, chapter by chapter, no
+markup. Handy for proofreading, comparing two translations, or feeding the
+text to another tool.
 
-## Reprendre les passages manqués
+## Retrying missed passages
 
-Il arrive qu'un modèle bute sur un paragraphe : réponse vide, balisage abîmé,
-sortie aberrante. Tulipe garde alors le texte d'origine plutôt que d'insérer
-quelque chose de douteux, et marque le passage d'un drapeau.
+A model sometimes stumbles on a paragraph: an empty answer, broken markup, a
+nonsensical output. Tulipe then keeps the original text rather than inserting
+something dubious, and flags the passage.
 
-À la fin de la traduction, il vous propose de les reprendre :
+At the end of the run, it offers to retry them:
 
 ```
 ✗ 3 passage(s) laissés en langue source
@@ -201,171 +206,171 @@ quelque chose de douteux, et marque le passage d'un drapeau.
 p reprendre les passages non traduits  •  entrée retour au menu
 ```
 
-Seuls ces passages sont renvoyés au modèle — trois paragraphes coûtent trois
-paragraphes, pas trois chapitres. La proposition réapparaît quand vous rouvrez
-le livre, et dans la liste « Reprendre une traduction ».
+Only those passages go back to the model — three paragraphs cost three
+paragraphs, not three chapters. The offer reappears when you reopen the book,
+and in the "Reprendre une traduction" (Resume a translation) list.
 
-En ligne de commande :
-
-```bash
-tulipe translate --retry --to français --code fr mon-livre.epub
-```
-
-## Dire au modèle de quoi parle le livre
-
-Une phrase suffit à caler le registre et à lever les ambiguïtés — « bar » n'a
-pas le même sens dans un roman noir et dans un manuel de physique.
+From the command line:
 
 ```bash
-tulipe translate --about "un roman noir new-yorkais des années 1950" \
-                 --to français --code fr mon-livre.epub
+tulipe translate --retry --to French --code fr my-book.epub
 ```
 
-Dans l'interface, c'est le champ **Contexte du livre** des réglages. Laissé
-vide, rien n'est ajouté au prompt.
+## Telling the model what the book is about
 
-Cette phrase est présentée au modèle comme du contexte, jamais comme une
-consigne : elle ne peut pas se substituer aux règles qui protègent votre
-fichier.
+One sentence is enough to settle the register and resolve ambiguity — "bar"
+doesn't mean the same thing in a noir novel and in a physics textbook.
 
-## Une traduction cohérente sur 300 pages
+```bash
+tulipe translate --about "a 1950s New York noir novel" \
+                 --to French --code fr my-book.epub
+```
 
-Un livre découpé en centaines de requêtes risque de dériver : le même
-personnage rebaptisé au chapitre 8, le tutoiement qui devient vouvoiement.
-Deux mécanismes l'évitent.
+In the interface, this is the **Contexte du livre** (Book context) field in
+the settings. Left empty, nothing is added to the prompt.
 
-Le **glossaire** fixe le vocabulaire. Une règle par ligne, rappelée à chaque
-requête :
+This sentence is presented to the model as context, never as an instruction:
+it cannot override the rules that protect your file.
+
+## Keeping a translation consistent across 300 pages
+
+A book split into hundreds of requests risks drifting: the same character
+renamed by chapter 8, an informal tone turning formal partway through. Two
+mechanisms prevent that.
+
+The **glossary** pins down vocabulary. One rule per line, restated on every
+request:
 
 ```
 Victory Mansions = Maison de la Victoire
 Newspeak = novlangue
 ```
 
-La **continuité** montre au modèle la fin du passage précédent, à titre de
-contexte seulement, pour qu'il retrouve le ton et le rythme.
+**Continuity** shows the model the end of the previous passage, purely as
+context, so it picks the tone and rhythm back up.
 
-## Quand ça se passe mal
+## When things go wrong
 
-Une traduction n'est retenue que si elle tient debout. Sinon le texte d'origine
-est conservé, et le passage est signalé dans le rapport de fin.
+A translation is only kept if it holds up. Otherwise the original text is
+preserved, and the passage is flagged in the final report.
 
-| Ce qui arrive | Ce que fait Tulipe |
+| What happens | What Tulipe does |
 |---|---|
-| Le modèle répond de travers | il réessaie, puis découpe le lot en deux, jusqu'au paragraphe isolé |
-| Un paragraphe reste intraduisible | le texte d'origine est gardé, et proposé à la reprise |
-| Le modèle renvoie du balisage abîmé | une esperluette isolée est réparée ; le reste fait garder la source |
-| La traduction contient des caractères interdits | la source est gardée : un tel livre ne s'ouvrirait pas |
-| Le balisage revient cassé | le passage d'origine est gardé et signalé |
-| Le service est surchargé | nouvelle tentative, en attendant de plus en plus longtemps |
-| Le service ne répond plus | l'appel est abandonné après un délai, puis réessayé |
-| Clé refusée, quota épuisé | arrêt immédiat, plutôt que de parcourir le livre à perte |
-| Un chapitre n'a rien donné | il est marqué en échec, jamais présenté comme traduit |
+| The model answers off-base | it retries, then splits the batch in two, down to the single paragraph |
+| A paragraph stays untranslatable | the original text is kept, and offered for retry |
+| The model returns broken markup | a lone ampersand is repaired; anything else keeps the source |
+| The translation contains forbidden characters | the source is kept: such a book wouldn't open |
+| Markup comes back broken | the original passage is kept and flagged |
+| The service is overloaded | retried, waiting longer each time |
+| The service stops responding | the call is abandoned after a timeout, then retried |
+| Key refused, quota exhausted | immediate stop, rather than grinding through the book for nothing |
+| A chapter yielded nothing | it's marked as failed, never presented as translated |
 
-Le chemin de sortie est vérifié **avant** la traduction : découvrir un dossier
-inexistant après trois cents pages serait le pire moment. Et le fichier produit
-est relu avant d'être écrit — s'il ne s'ouvrait pas, Tulipe préfère signaler le
-document plutôt que rendre un livre cassé.
+The output path is checked **before** translation starts: discovering a
+missing folder after three hundred pages would be the worst possible moment.
+And the produced file is read back before being written — if it wouldn't
+open, Tulipe would rather flag the document than hand you a broken book.
 
-Les décomptes de jetons affichés sont ceux que le service communique. Quand il
-n'en communique pas, Tulipe l'écrit — il n'estime rien, et ne convertit jamais
-en euros : les tarifs changent, un chiffre inventé serait pire qu'aucun.
+The token counts shown are whatever the service reports. When it reports
+none, Tulipe says so — it never estimates, and never converts to a currency:
+rates change, and a made-up number would be worse than none.
 
-## Comment votre livre reste intact
+## How your book stays intact
 
-C'est le cœur de Tulipe, et cela tient en une idée.
+This is the heart of Tulipe, and it comes down to one idea.
 
-Un EPUB est un ensemble de fichiers XHTML. L'approche naïve consiste à donner
-un chapitre entier au modèle et à lui demander de renvoyer le même fichier
-traduit. Elle casse tôt ou tard : une balise oubliée, une entité mal recopiée,
-un attribut réécrit — et la liseuse refuse le livre.
+An EPUB is a set of XHTML files. The naive approach is to hand a whole
+chapter to the model and ask it to return the same file, translated. It
+breaks sooner or later: a forgotten tag, a mis-copied entity, a rewritten
+attribute — and the reading app refuses the book.
 
-Tulipe ne fait jamais cela. Il note **la position exacte, en octets**, de
-chaque passage de prose dans le fichier d'origine. Le modèle ne voit que ces
-passages. Les traductions sont ensuite réinsérées à ces positions précises, et
-tout le reste du fichier est recopié sans être relu : déclaration XML,
-DOCTYPE, feuilles de style, images, scripts, attributs.
+Tulipe never does that. It records **the exact byte position** of every prose
+passage in the original file. The model only ever sees those passages. The
+translations are then spliced back in at those exact positions, and
+everything else in the file is copied over unread: the XML declaration, the
+DOCTYPE, stylesheets, images, scripts, attributes.
 
-Le livre traduit est donc, littéralement, votre livre d'origine avec d'autres
-mots dedans.
+The translated book is, quite literally, your original book with different
+words inside it.
 
-## Contribuer
+## Contributing
 
 ```bash
-go test ./...        # les tests
-go test -race ./...  # avec détecteur de course
+go test ./...        # the tests
+go test -race ./...  # with the race detector
 go vet ./...
 ```
 
-Aucun test n'appelle le réseau ni n'exige de clé : tout tourne hors ligne.
-[`CLAUDE.md`](CLAUDE.md) décrit l'architecture et les invariants à respecter.
+No test calls the network or needs a key: everything runs offline.
+[`CLAUDE.md`](CLAUDE.md) describes the architecture and the invariants to
+respect.
 
-Pour publier une version : onglet **Actions** → **Release** → **Run workflow**,
-saisir le numéro (`v0.2.0`). Le workflow vérifie le code, compile les trois
-binaires et publie. Pousser un tag `v*` produit le même résultat.
+To publish a release: **Actions** tab → **Release** → **Run workflow**, enter
+the version number (`v0.2.0`). The workflow checks the code, builds the three
+binaries, and publishes. Pushing a `v*` tag produces the same result.
 
-## Référence
+## Reference
 
-### Ce qui est traduit
+### What gets translated
 
-Le texte des chapitres, les titres de la table des matières, et le titre de
-chaque document.
+Chapter text, the table-of-contents titles, and the title of each document.
 
-Ne sont pas envoyés au modèle : les blocs de code préformatés, les formules,
-les graphiques vectoriels, et le contenu des attributs — donc les descriptions
-d'images. Le titre du livre et le nom de l'auteur restent eux aussi tels quels :
-les traduire est une décision éditoriale, qui ne revient pas à un outil.
+Not sent to the model: preformatted code blocks, formulas, vector graphics,
+and attribute content — so image descriptions. The book's title and the
+author's name are also left untouched: translating them is an editorial
+decision, not a tool's to make.
 
-Un document déclarant un encodage autre qu'UTF-8 est laissé intact et signalé,
-plutôt que d'être converti au risque de l'abîmer.
+A document declaring an encoding other than UTF-8 is left untouched and
+flagged, rather than converted at the risk of breaking it.
 
-### Reprendre une traduction
+### Resuming a translation
 
-Les chapitres traduits sont conservés dans le dossier de cache de votre système
-(`~/.cache/tulipe/` sous Linux). Relancer le même livre reprend là où il s'était arrêté ; l'entrée « Reprendre une traduction »
-du menu liste les travaux en attente, et `--no-resume` ignore le cache.
+Translated chapters are kept in your system's cache folder
+(`~/.cache/tulipe/` on Linux). Re-running the same book picks up where it
+left off; the "Reprendre une traduction" (Resume a translation) menu entry
+lists pending jobs, and `--no-resume` ignores the cache.
 
-Changer de modèle, de langue, de glossaire, de contexte ou de consignes relance
-une traduction neuve : le cache tient compte de tout ce qui modifie le résultat.
-Régler la taille des lots, en revanche, ne le jette pas.
+Changing the model, language, glossary, context or style notes starts a
+fresh translation: the cache accounts for everything that changes the
+outcome. Adjusting the batch size, though, doesn't discard it.
 
-### Options de `translate`
-
-```
---to             langue cible, écrite comme un humain l'écrirait
---code           étiquette BCP 47 inscrite dans le livre (fr, es, pt-BR…)
---from           langue source (vide : détectée)
---from-code      étiquette BCP 47 de la source (utile à DeepL)
---provider       service à utiliser (voir « tulipe providers »)
---model          identifiant du modèle (voir « tulipe models »)
---base-url       adresse d'un service compatible OpenAI
---effort         low, medium, high, xhigh, max (Claude uniquement)
---format         epub (défaut) ou txt
--o               fichier de sortie
---glossary-file  glossaire, une règle « source = cible » par ligne
---style          consignes de style ajoutées aux instructions
---about          le livre en une phrase, pour caler le registre
---retry          reprendre les passages laissés en langue source
---no-resume      repartir de zéro, sans réutiliser le cache
---quiet          n'afficher que le chemin du fichier produit
-```
-
-Réglages plus fins, à ne toucher qu'en cas de besoin : `--chunk` (caractères
-par requête, 4000), `--max-segments` (40), `--max-tokens` (16000),
-`--attempts` (4), `--timeout` (300 s), `--context` (400).
-
-### Autres commandes
+### Options for `translate`
 
 ```
-tulipe                    ouvre le menu
-tulipe livre.epub         ouvre le menu sur ce livre
-tulipe providers          les services connus et la clé attendue
-tulipe models             les modèles, demandés au service
-tulipe config             la configuration courante
+--to             target language, written the way a human would write it
+--code           BCP 47 tag written into the book (fr, es, pt-BR…)
+--from           source language (empty: auto-detected)
+--from-code      BCP 47 tag of the source (useful for DeepL)
+--provider       which service to use (see "tulipe providers")
+--model          model identifier (see "tulipe models")
+--base-url       base URL of an OpenAI-compatible service
+--effort         low, medium, high, xhigh, max (Claude only)
+--format         epub (default) or txt
+-o               output file
+--glossary-file  glossary, one "source = target" rule per line
+--style          style notes appended to the instructions
+--about          the book in one sentence, to calibrate register
+--retry          retry the passages left in the source language
+--no-resume      start fresh, without reusing the cache
+--quiet          only print the path of the produced file
+```
+
+Finer-grained settings, only worth touching if you need to: `--chunk`
+(characters per request, 4000), `--max-segments` (40), `--max-tokens`
+(16000), `--attempts` (4), `--timeout` (300s), `--context` (400).
+
+### Other commands
+
+```
+tulipe                    opens the menu
+tulipe book.epub          opens the menu on this book
+tulipe providers          known services and the key each expects
+tulipe models             the models, asked directly of the service
+tulipe config             the current configuration
 tulipe version
 ```
 
-## Références
+## References
 
-- [EPUB 3.3](https://www.w3.org/TR/epub-33/) — la spécification du format
-- [Open Container Format](https://www.w3.org/TR/epub-33/#sec-ocf) — la structure de l'archive
+- [EPUB 3.3](https://www.w3.org/TR/epub-33/) — the format specification
+- [Open Container Format](https://www.w3.org/TR/epub-33/#sec-ocf) — the archive's structure
