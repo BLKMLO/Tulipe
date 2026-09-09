@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"reflect"
 	"strings"
 	"testing"
 
@@ -185,33 +186,38 @@ func TestRecipeKeyChangesWithEverySemanticSetting(t *testing.T) {
 	base := Recipe{
 		Provider: "anthropic", Model: "m", Effort: "medium",
 		TargetLanguage: "français", TargetCode: "fr",
-		SourceLanguage: "english", Glossary: "a = b", StyleNotes: "sobre",
+		SourceLanguage: "english", SourceCode: "en",
+		Glossary: "a = b", StyleNotes: "sobre", About: "un roman",
+		KeepOriginalTitles: false,
 	}
 	seen := map[string]string{base.key("livre"): "base"}
 
-	variants := map[string]Recipe{}
-	for name, mutate := range map[string]func(*Recipe){
-		"provider":    func(r *Recipe) { r.Provider = "openai-compatible" },
-		"model":       func(r *Recipe) { r.Model = "autre" },
-		"effort":      func(r *Recipe) { r.Effort = "max" },
-		"langue":      func(r *Recipe) { r.TargetLanguage = "español" },
-		"code":        func(r *Recipe) { r.TargetCode = "es" },
-		"source":      func(r *Recipe) { r.SourceLanguage = "deutsch" },
-		"code source": func(r *Recipe) { r.SourceCode = "de" },
-		"glossary":    func(r *Recipe) { r.Glossary = "a = c" },
-		"style":       func(r *Recipe) { r.StyleNotes = "familier" },
-	} {
+	// Walking the struct rather than a hand-written list is the point: a
+	// setting added to Recipe and forgotten here would be exactly the silent
+	// hole this test exists to close.
+	v := reflect.ValueOf(base)
+	for i := 0; i < v.NumField(); i++ {
+		name := v.Type().Field(i).Name
 		r := base
-		mutate(&r)
-		variants[name] = r
-	}
-	for name, r := range variants {
+		f := reflect.ValueOf(&r).Elem().Field(i)
+		switch f.Kind() {
+		case reflect.String:
+			f.SetString(f.String() + "-autre")
+		case reflect.Bool:
+			f.SetBool(!f.Bool())
+		default:
+			t.Fatalf("%s has kind %s, which this test does not know how to vary", name, f.Kind())
+		}
+		if f.Interface() == v.Field(i).Interface() {
+			t.Fatalf("%s was not actually changed", name)
+		}
 		k := r.key("livre")
 		if other, clash := seen[k]; clash {
 			t.Errorf("changing %s produces the same cache key as %s: cached work would be reused wrongly", name, other)
 		}
 		seen[k] = name
 	}
+
 	// A different book must not share a key either.
 	if base.key("livre") == base.key("autre-livre") {
 		t.Error("two different books share a cache key")

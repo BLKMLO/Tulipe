@@ -108,6 +108,10 @@ func (m Model) shownModels() []string {
 	return out
 }
 
+// modelsChrome is what the model picker spends on its header, counters and
+// key hints.
+const modelsChrome = 9
+
 func (m Model) viewModels() string {
 	var b strings.Builder
 	b.WriteString(header(i18n.T("ui.models.title")) + "\n\n")
@@ -130,10 +134,13 @@ func (m Model) viewModels() string {
 	}
 	b.WriteString("\n\n")
 
-	const window = 12
+	window := m.listRows(modelsChrome)
 	cursor := clampIndex(m.modelsIndex, len(shown))
 	start := clamp(cursor-window/2, 0, max(0, len(shown)-window))
 	end := min(len(shown), start+window)
+	if start > 0 {
+		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-above", start)) + "\n")
+	}
 	for i := start; i < end; i++ {
 		b.WriteString(selectLine(i == cursor, shown[i], "") + "\n")
 	}

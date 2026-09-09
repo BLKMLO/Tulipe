@@ -142,6 +142,12 @@ func settingsFields() []field {
 			set:  func(c *config.Config, v string) error { c.SourceCode = strings.TrimSpace(v); return nil },
 		},
 		{
+			label: i18n.T("ui.field.titles"), kind: fieldBool,
+			help: i18n.T("ui.field.titles.help"),
+			get:  func(c config.Config) string { return boolLabel(c.TranslateTitles) },
+			set:  setBool(func(c *config.Config, b bool) { c.TranslateTitles = b }),
+		},
+		{
 			label: i18n.T("ui.field.chunk"), kind: fieldInt,
 			help: i18n.T("ui.field.chunk.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.ChunkChars) },
@@ -399,14 +405,29 @@ func (m *Model) cycleChoice(fd field, step int) {
 	f.dirty = true
 }
 
+// settingsChrome is how many lines the settings screen spends on everything
+// that is not a field: the header, the help panel under the list, the unsaved
+// marker and the key hints.
+const settingsChrome = 13
+
 func (m Model) viewSettings() string {
 	f := m.settings
 	var b strings.Builder
 	b.WriteString(header(i18n.T("ui.settings.title")) + "\n\n")
 
 	vis := f.visible()
-	for i, idx := range vis {
-		fd := f.fields[idx]
+	// The list is windowed to what the terminal can actually show. Rendering
+	// every field and letting the terminal scroll away the top is what forced
+	// people to resize their window to reach the last setting.
+	rows := m.listRows(settingsChrome)
+	start := clamp(f.index-rows/2, 0, max(0, len(vis)-rows))
+	end := min(len(vis), start+rows)
+
+	if start > 0 {
+		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-above", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		fd := f.fields[vis[i]]
 		selected := i == f.index
 		value := fd.get(f.cfg)
 		if fd.kind == fieldChoice || fd.kind == fieldBool {
@@ -426,6 +447,9 @@ func (m Model) viewSettings() string {
 			labelSt = accentStyle.Bold(true)
 		}
 		b.WriteString(prefix + labelSt.Render(pad(fd.label, 22)) + valueStyle.Render(value) + "\n")
+	}
+	if end < len(vis) {
+		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-below", len(vis)-end)) + "\n")
 	}
 
 	if len(vis) > 0 {

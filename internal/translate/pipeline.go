@@ -136,6 +136,15 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 	opts.Options = opts.Options.Defaults()
 	started := time.Now()
 
+	// The table of contents holds nothing but titles, so it follows the
+	// "translate titles" setting rather than the prose rules.
+	navigation := map[string]bool{}
+	for _, nav := range []string{book.NavPath, book.NCXPath} {
+		if nav != "" {
+			navigation[nav] = true
+		}
+	}
+
 	titles := map[string]string{}
 	for _, ch := range book.Chapters {
 		if _, seen := titles[ch.Path]; !seen {
@@ -196,7 +205,13 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 			continue
 		}
 
-		meta := DocMeta{BookTitle: book.Title, Title: res.Documents[i].Title, Index: i + 1, Total: len(names)}
+		meta := DocMeta{
+			BookTitle:  book.Title,
+			Title:      res.Documents[i].Title,
+			Index:      i + 1,
+			Total:      len(names),
+			Navigation: navigation[name],
+		}
 
 		if opts.Cache != nil {
 			if cached, ok := opts.Cache.Get(name); ok {

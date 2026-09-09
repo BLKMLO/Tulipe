@@ -35,6 +35,15 @@ type Options struct {
 	Glossary string
 	// StyleNotes are free-form instructions appended to the system prompt.
 	StyleNotes string
+	// KeepOriginalTitles leaves headings and the table of contents in the
+	// source language. Some readers want the titles untouched so the book
+	// still matches its reviews and its index.
+	//
+	// The field is worded the negative way round on purpose: the zero value
+	// has to mean "translate everything", which is both the older behaviour
+	// and the one a caller that forgot the setting should get. config.Config
+	// carries the positive TranslateTitles, which is what the reader is shown.
+	KeepOriginalTitles bool
 	// About describes the book in one sentence — its genre, period, subject.
 	// It settles register and the sense of ambiguous words. Empty disables it
 	// entirely: no sentence is added to the prompt.
@@ -143,6 +152,9 @@ type DocMeta struct {
 	Title     string
 	Index     int // 1-based position in the book
 	Total     int
+	// Navigation marks the table of contents (nav or NCX). It holds nothing
+	// but titles, so the "translate titles" setting governs it entirely.
+	Navigation bool
 }
 
 // Note is a problem worth showing the user. Nothing is ever silently dropped:
@@ -200,29 +212,61 @@ func Document(ctx context.Context, p llm.Provider, opts Options, meta DocMeta, n
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
-	res := &DocResult{Segments: len(segs), Tail: tail}
-	if len(segs) == 0 {
+	subset, numbers := translatable(segs, !opts.KeepOriginalTitles, meta.Navigation)
+	res := &DocResult{Segments: len(subset), Tail: tail}
+	if len(subset) == 0 {
 		res.Output = doc
 		return res, nil
 	}
 
 	t := &translator{
 		ctx: ctx, provider: p, opts: opts, meta: meta,
-		name: name, segs: segs, res: res, onEvent: onEvent,
-		tail: tail,
+		name: name, segs: subset, numbers: numbers, res: res,
+		onEvent: onEvent, tail: tail,
 	}
 	translations := t.run()
 	if t.abortErr != nil {
 		return res, t.abortErr
 	}
 
-	out, err := epub.Apply(doc, segs, translations)
+	// Segments left out keep an empty translation, which epub.Apply reads as
+	// "leave this span alone".
+	full := make([]string, len(segs))
+	for k, idx := range numbers {
+		full[idx] = translations[k]
+	}
+
+	out, err := epub.Apply(doc, segs, full)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", name, err)
 	}
 	res.Output = out
 	res.Tail = t.tail
 	return res, ctx.Err()
+}
+
+// translatable narrows a document to the segments the settings say to send.
+// The indices of the whole document travel alongside, so notes and the pending
+// list still name the right paragraph.
+//
+// Nothing is dropped from the document itself: a segment left out simply keeps
+// its source text, which is also what a failed translation does.
+func translatable(segs []epub.Segment, titles, navigation bool) (subset []epub.Segment, numbers []int) {
+	if titles {
+		numbers = make([]int, len(segs))
+		for i := range segs {
+			numbers[i] = i
+		}
+		return segs, numbers
+	}
+	for i, s := range segs {
+		if s.Title || navigation {
+			continue
+		}
+		subset = append(subset, s)
+		numbers = append(numbers, i)
+	}
+	return subset, numbers
 }
 
 type translator struct {

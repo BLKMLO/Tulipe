@@ -36,6 +36,17 @@ type Segment struct {
 	Kind   Kind
 	Source string // raw source bytes of the span
 	Elem   string // element that produced the span, for diagnostics
+	// Title marks a heading or the document's <title>. Whether these get
+	// translated is the reader's choice, so they are flagged here rather than
+	// left out: keeping every segment in the list means the numbering stays
+	// the same whichever way the setting is turned, and a resume cache written
+	// under one setting still lines up.
+	Title bool
+}
+
+// titleElements are the block elements that hold a title rather than prose.
+var titleElements = map[string]bool{
+	"h1": true, "h2": true, "h3": true, "h4": true, "h5": true, "h6": true,
 }
 
 // blockElements start a block segment: the whole inner markup is translated in
@@ -108,6 +119,9 @@ func Extract(doc []byte) ([]Segment, error) {
 		// the reported position would swallow the rest of the file, and
 		// replacing that span would truncate the chapter.
 		lastEnd int
+		// open is the stack of element names currently entered, so a run of
+		// character data knows what holds it.
+		open []string
 	)
 	for {
 		before := int(d.InputOffset())
@@ -129,6 +143,7 @@ func Extract(doc []byte) ([]Segment, error) {
 		case xml.StartElement:
 			depth++
 			name := strings.ToLower(t.Name.Local)
+			open = append(open, name)
 			if inSeg || skipDepth > 0 {
 				break
 			}
@@ -148,6 +163,7 @@ func Extract(doc []byte) ([]Segment, error) {
 					end = before
 				}
 				if seg, ok := makeSegment(doc, segStart, end, KindBlock, segElem); ok {
+					seg.Title = titleElements[segElem]
 					segs = append(segs, seg)
 				}
 				inSeg = false
@@ -155,12 +171,21 @@ func Extract(doc []byte) ([]Segment, error) {
 			if skipDepth == depth {
 				skipDepth = 0
 			}
+			if len(open) > 0 {
+				open = open[:len(open)-1]
+			}
 			depth--
 		case xml.CharData:
 			if inSeg || skipDepth > 0 {
 				break
 			}
+			enclosing := ""
+			if len(open) > 0 {
+				enclosing = open[len(open)-1]
+			}
 			if seg, ok := makeSegment(doc, before, after, KindText, ""); ok {
+				// The <title> of a content document is a title like any other.
+				seg.Title = enclosing == "title"
 				segs = append(segs, seg)
 			}
 		}
