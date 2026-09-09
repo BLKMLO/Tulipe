@@ -112,6 +112,7 @@ func showConfig() error {
 	fmt.Printf("délai par appel    %d s\n", cfg.TimeoutSeconds)
 	fmt.Printf("continuité         %d caractères\n", cfg.ContextChars)
 	fmt.Printf("reprise            %v\n", cfg.Resume)
+	fmt.Println("contexte du livre  " + orNone(cfg.About))
 	fmt.Println("format de sortie   " + cfg.Format)
 	fmt.Println("dossier de sortie  " + orNone(cfg.OutputDir))
 	return nil
@@ -215,6 +216,7 @@ type cliOptions struct {
 	output       string
 	glossaryFile string
 	noResume     bool
+	retry        bool
 	quiet        bool
 	yes          bool
 }
@@ -235,11 +237,13 @@ func translateFlags(cfg *config.Config, o *cliOptions) *flag.FlagSet {
 	fs.IntVar(&cfg.ContextChars, "context", cfg.ContextChars, "caractères de continuité montrés au modèle")
 	fs.IntVar(&cfg.TimeoutSeconds, "timeout", cfg.TimeoutSeconds, "secondes accordées à un appel au modèle")
 	fs.StringVar(&cfg.StyleNotes, "style", cfg.StyleNotes, "consignes de style ajoutées aux instructions")
+	fs.StringVar(&cfg.About, "about", cfg.About, "le livre en une phrase, pour caler le registre (vide : rien n'est ajouté)")
 	fs.StringVar(&cfg.SourceCode, "from-code", cfg.SourceCode, "étiquette BCP 47 de la langue source (utile à DeepL)")
 	fs.StringVar(&cfg.Format, "format", cfg.Format, "format de sortie : epub ou txt")
 	fs.StringVar(&o.output, "o", "", "fichier de sortie (défaut : <livre>.<code>.epub, jamais écrasé)")
 	fs.StringVar(&o.glossaryFile, "glossary-file", "", "fichier de glossaire, une règle « source = cible » par ligne")
 	fs.BoolVar(&o.noResume, "no-resume", false, "ne pas réutiliser les chapitres déjà traduits")
+	fs.BoolVar(&o.retry, "retry", false, "reprendre les passages qu'une traduction précédente a laissés en langue source")
 	fs.BoolVar(&o.quiet, "quiet", false, "n'afficher que le résultat final")
 	return fs
 }
@@ -292,5 +296,5 @@ func runTranslate(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return ui.RunHeadless(ctx, cfg, source, o.output, o.quiet)
+	return ui.RunHeadless(ctx, cfg, source, o.output, o.retry, o.quiet)
 }

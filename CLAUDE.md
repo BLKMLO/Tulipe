@@ -164,6 +164,29 @@ Dans `internal/translate` :
   ajouter aussi un test dans `translate_test.go`, sur le modèle de
   `TestBrokenMarkupIsRejected`.
 
+## Reprendre les passages manqués
+
+Un segment dont la traduction est refusée par `accept` garde son texte source
+et son indice est ajouté à `DocResult.Pending`. `FileCache` écrit cette liste
+dans un fichier `.pending` à côté du document, via l'interface facultative
+`PendingStore`.
+
+`RetryPending` retraduit uniquement ces segments et les recolle dans le
+document **déjà traduit**, pas dans la source. Deux garde-fous s'y trouvent :
+
+- la source et le document précédent doivent avoir le même nombre de segments,
+  sinon les positions ne correspondent plus et la fonction refuse ;
+- `translator.numbers` remappe les indices du sous-ensemble vers ceux du
+  document entier, faute de quoi les notes et le nouveau `Pending`
+  désigneraient les mauvais paragraphes.
+
+Un cache sans `.pending` — écrit avant cette fonctionnalité — répond « inconnu »,
+ce qui est délibérément distinct de « rien en attente » : reprendre sur une
+supposition retraduirait le livre entier. `pendingOf` porte cette distinction.
+
+Une reprise qui échoue ne perd rien : `Book` remet le document précédent et
+note l'échec.
+
 ## Le disjoncteur
 
 `failureCounter` compte les échecs consécutifs, **partagé par tous les
@@ -199,7 +222,8 @@ HTTP arrive, exploitable ou non — les jetons sont dépensés dans les deux cas
 ## Clé du cache de reprise
 
 `translate.Recipe` liste **tout ce qui change le résultat** : fournisseur,
-modèle, effort, langues (noms et codes), glossaire, consignes de style. C'est ce qui donne la
+modèle, effort, langues (noms et codes), glossaire, consignes de style,
+phrase de contexte. C'est ce qui donne la
 clé du cache. Ajouter un réglage qui influence la traduction sans l'ajouter à
 `Recipe` fait resservir en silence une traduction obtenue sous d'autres
 réglages — un utilisateur qui corrige son glossaire récupérerait l'ancienne
@@ -208,6 +232,25 @@ propriété.
 
 Le découpage (`ChunkChars`, `MaxSegments`) est délibérément hors de `Recipe` :
 le régler ne doit pas jeter le cache.
+
+## Le prompt
+
+Pour le lire tel qu'il part au modèle, sans dépenser un jeton :
+
+```bash
+TULIPE_PROMPT=1 go test ./internal/translate/ -run TestDumpPrompt -v
+```
+
+Deux choses à ne pas défaire dans `prompt.go` :
+
+- `encodeSegments` désactive l'échappement HTML de Go. Le modèle doit
+  reproduire les balises exactement ; lui montrer `<em>` plutôt que
+  `\u003cem\u003e` sert cette exigence et coûte moins de jetons. Le résultat
+  reste du JSON valide, ce que `TestSegmentsAreSentWithReadableMarkup`
+  vérifie.
+- `Options.About` est présenté comme du **contexte**, explicitement pas comme
+  une consigne. Sans cette précaution, une phrase telle que « traduis
+  librement » se substituerait aux règles qui protègent le fichier.
 
 ## Chiffres affichés
 

@@ -11,6 +11,7 @@ import (
 	"github.com/blkmlo/tulipe/internal/config"
 	"github.com/blkmlo/tulipe/internal/epub"
 	"github.com/blkmlo/tulipe/internal/llm"
+	"github.com/blkmlo/tulipe/internal/translate"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -386,4 +387,79 @@ func testBookForUI(t *testing.T) *epub.Book {
 		t.Fatal(err)
 	}
 	return book
+}
+
+func TestReportOffersToRetryPendingPassages(t *testing.T) {
+	m := newTestModel()
+	m.book = testBookForUI(t)
+	m.result = &translate.Result{Documents: []translate.DocState{
+		{Title: "I", Status: translate.StatusDone, Translated: 40, TotalSegments: 42, Pending: 2, Notes: 2},
+	}}
+	m.screen = screenReport
+
+	view := m.View()
+	if !strings.Contains(view, "reprendre les passages non traduits") {
+		t.Errorf("le rapport doit proposer la reprise :\n%s", view)
+	}
+
+	// Nothing pending, nothing failed: no offer.
+	clean := newTestModel()
+	clean.result = &translate.Result{Documents: []translate.DocState{
+		{Title: "I", Status: translate.StatusDone, Translated: 42, TotalSegments: 42},
+	}}
+	clean.screen = screenReport
+	if strings.Contains(clean.View(), "reprendre les passages") {
+		t.Error("aucune reprise ne doit être proposée quand tout est traduit")
+	}
+}
+
+func TestRetryKeyAsksForAPartialRun(t *testing.T) {
+	m := newTestModel()
+	m.book = testBookForUI(t)
+	m.bookPath = "/livres/x.epub"
+	m.result = &translate.Result{Documents: []translate.DocState{
+		{Title: "I", Status: translate.StatusDone, Pending: 2, TotalSegments: 10},
+	}}
+	m.screen = screenReport
+	m = press(t, m, "p")
+	if !m.retryOnly {
+		t.Error("« p » doit demander une reprise des seuls passages en attente")
+	}
+}
+
+func TestBookScreenShowsPendingPassages(t *testing.T) {
+	m := newTestModel()
+	m.book = testBookForUI(t)
+	m.bookPath = "/livres/x.epub"
+	m.stats = bookStats{Documents: 1, Segments: 42, Chars: 9000}
+	m.pending = 3
+	m.screen = screenBook
+
+	view := m.View()
+	if !strings.Contains(view, "3 passage(s) laissés en langue source") {
+		t.Errorf("l'écran du livre doit signaler les passages en attente :\n%s", view)
+	}
+	if !strings.Contains(view, "reprendre les passages en attente") {
+		t.Error("la touche de reprise doit être proposée")
+	}
+
+	// A book with nothing pending must not offer it.
+	m.pending = 0
+	if strings.Contains(m.View(), "reprendre les passages en attente") {
+		t.Error("aucune reprise ne doit être proposée sans passage en attente")
+	}
+}
+
+func TestRetryKeyWithoutPendingExplainsItself(t *testing.T) {
+	m := newTestModel()
+	m.book = testBookForUI(t)
+	m.pending = 0
+	m.screen = screenBook
+	m = press(t, m, "p")
+	if m.retryOnly {
+		t.Error("aucune reprise ne doit être lancée sans passage en attente")
+	}
+	if !strings.Contains(m.View(), "Aucun passage à reprendre") {
+		t.Errorf("l'appui doit être expliqué :\n%s", m.View())
+	}
 }

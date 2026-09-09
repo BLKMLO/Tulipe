@@ -46,6 +46,30 @@ func (r RunInfo) Done() int {
 	return n
 }
 
+// Pending counts the passages this run left in the source language, across
+// every document.
+func (r RunInfo) Pending() int {
+	entries, err := os.ReadDir(r.Dir)
+	if err != nil {
+		return 0
+	}
+	total := 0
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) != ".pending" {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(r.Dir, e.Name()))
+		if err != nil {
+			continue
+		}
+		var idx []int
+		if json.Unmarshal(data, &idx) == nil {
+			total += len(idx)
+		}
+	}
+	return total
+}
+
 // Recipe is everything that changes what a translation comes out as. Two runs
 // that agree on all of it may share cached documents; two runs that differ on
 // any of it must not — otherwise fixing a glossary and running again would
@@ -60,6 +84,7 @@ type Recipe struct {
 	SourceCode     string
 	Glossary       string
 	StyleNotes     string
+	About          string
 }
 
 // key derives the cache identity of a book translated under this recipe.
@@ -67,7 +92,7 @@ func (r Recipe) key(fingerprint string) string {
 	sum := sha256.Sum256([]byte(strings.Join([]string{
 		fingerprint, r.Provider, r.Model, r.Effort,
 		r.TargetLanguage, r.TargetCode, r.SourceLanguage, r.SourceCode,
-		r.Glossary, r.StyleNotes,
+		r.Glossary, r.StyleNotes, r.About,
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])[:16]
 }
@@ -101,6 +126,40 @@ func (c *FileCache) Get(key string) ([]byte, bool) {
 	return data, true
 }
 
+// pendingPath is where the list of untranslated segments of a document lives,
+// next to the document itself.
+func (c *FileCache) pendingPath(key string) string {
+	return c.path(key) + ".pending"
+}
+
+// GetPending returns the segments an earlier pass left in the source language.
+// The second result is false when nothing was recorded — which is not the same
+// as "nothing is pending": a cache written before this was tracked simply does
+// not know, and must not be retried blindly.
+func (c *FileCache) GetPending(key string) ([]int, bool) {
+	data, err := os.ReadFile(c.pendingPath(key))
+	if err != nil {
+		return nil, false
+	}
+	var out []int
+	if err := json.Unmarshal(data, &out); err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+// PutPending records the segments left in the source language.
+func (c *FileCache) PutPending(key string, indices []int) error {
+	if indices == nil {
+		indices = []int{}
+	}
+	data, err := json.Marshal(indices)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(c.pendingPath(key), data, 0o600)
+}
+
 // Put implements Cache.
 func (c *FileCache) Put(key string, data []byte) error {
 	tmp := c.path(key) + ".tmp"
@@ -108,6 +167,14 @@ func (c *FileCache) Put(key string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp, c.path(key))
+}
+
+// PendingStore is an optional Cache capability: remembering which passages of
+// a document stayed in the source language, so a later pass can retry exactly
+// those.
+type PendingStore interface {
+	GetPending(key string) ([]int, bool)
+	PutPending(key string, indices []int) error
 }
 
 // Discard removes every cached document of this run.

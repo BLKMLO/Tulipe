@@ -221,3 +221,101 @@ func TestRecipeKeyChangesWithEverySemanticSetting(t *testing.T) {
 		t.Error("the cache key is not stable")
 	}
 }
+
+// memCacheWithPending is a cache that also remembers untranslated passages.
+type memCacheWithPending struct {
+	memCache
+	pending map[string][]int
+}
+
+func newMemCache() *memCacheWithPending {
+	return &memCacheWithPending{
+		memCache: memCache{data: map[string][]byte{}},
+		pending:  map[string][]int{},
+	}
+}
+
+func (m *memCacheWithPending) GetPending(k string) ([]int, bool) {
+	v, ok := m.pending[k]
+	return v, ok
+}
+
+func (m *memCacheWithPending) PutPending(k string, idx []int) error {
+	m.pending[k] = idx
+	return nil
+}
+
+func TestBookRecordsAndRetriesPendingPassages(t *testing.T) {
+	cache := newMemCache()
+	opts := bookOpts()
+	opts.Cache = cache
+
+	// First run: everything containing "first" comes back empty.
+	shy := &fakeProvider{answer: refuseContaining("first")}
+	res1, err := Book(context.Background(), shy, testBook(t), opts, nil)
+	if err != nil {
+		t.Fatalf("premier passage : %v", err)
+	}
+	if res1.Pending() == 0 {
+		t.Fatal("aucun passage signalé comme laissé en langue source")
+	}
+	if !res1.Retryable() {
+		t.Error("Retryable() = false alors que des passages restent à reprendre")
+	}
+
+	// A plain re-run reuses the cache and asks nothing.
+	quiet := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	res2, err := Book(context.Background(), quiet, testBook(t), opts, nil)
+	if err != nil {
+		t.Fatalf("second passage : %v", err)
+	}
+	if quiet.calls != 0 {
+		t.Errorf("%d appel(s) sur une simple relance ; le cache doit suffire", quiet.calls)
+	}
+	if res2.Pending() != res1.Pending() {
+		t.Errorf("Pending = %d, want %d — le compte doit survivre au cache", res2.Pending(), res1.Pending())
+	}
+
+	// With RetryPending, only the failed passages are sent again.
+	willing := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	opts.RetryPending = true
+	book := testBook(t)
+	res3, err := Book(context.Background(), willing, book, opts, nil)
+	if err != nil {
+		t.Fatalf("reprise : %v", err)
+	}
+	if got := totalSegments(willing); got != res1.Pending() {
+		t.Errorf("%d segments envoyés lors de la reprise, want %d", got, res1.Pending())
+	}
+	if res3.Pending() != 0 {
+		t.Errorf("Pending = %d après une reprise réussie, want 0", res3.Pending())
+	}
+	if res3.Retryable() {
+		t.Error("Retryable() = true alors que tout est traduit")
+	}
+	doc, _ := book.Read("a.xhtml")
+	if strings.Contains(string(doc), "first chapter") {
+		t.Errorf("le passage repris est resté en langue source :\n%s", doc)
+	}
+}
+
+func TestRetryIsSkippedWhenTheCacheCannotRemember(t *testing.T) {
+	// A cache without a pending store predates the feature. Retrying on a
+	// guess would re-translate the whole book, so it must not happen.
+	cache := &memCache{data: map[string][]byte{}}
+	opts := bookOpts()
+	opts.Cache = cache
+	shy := &fakeProvider{answer: refuseContaining("first")}
+	if _, err := Book(context.Background(), shy, testBook(t), opts, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	opts.RetryPending = true
+	quiet := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	if _, err := Book(context.Background(), quiet, testBook(t), opts, nil); err != nil {
+		t.Fatal(err)
+	}
+	if quiet.calls != 0 {
+		t.Errorf("%d appel(s) ; sans mémoire des passages, la reprise doit s'abstenir", quiet.calls)
+	}
+}

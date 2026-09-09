@@ -32,9 +32,12 @@ type DocState struct {
 	// language. A document where this stays at zero has not been translated,
 	// whatever else happened.
 	Translated int
-	Notes      int
-	Err        error
-	Duration   time.Duration
+	// Pending is how many passages of this document are still in the source
+	// language, and could be retried.
+	Pending  int
+	Notes    int
+	Err      error
+	Duration time.Duration
 }
 
 // Progress is emitted whenever anything moves. Documents holds the state of
@@ -70,6 +73,21 @@ func (r *Result) Segments() (translated, total int) {
 	return translated, total
 }
 
+// Pending totals the passages still in the source language across the book.
+func (r *Result) Pending() int {
+	n := 0
+	for _, d := range r.Documents {
+		n += d.Pending
+	}
+	return n
+}
+
+// Retryable reports whether another pass could improve on this one: some
+// document failed outright, or some passage stayed in the source language.
+func (r *Result) Retryable() bool {
+	return len(r.Failed()) > 0 || r.Pending() > 0
+}
+
 // Failed lists the documents that could not be translated.
 func (r *Result) Failed() []DocState {
 	var out []DocState
@@ -99,6 +117,10 @@ type BookOptions struct {
 	// StopOnError aborts the run at the first failing document instead of
 	// carrying on with the rest of the book.
 	StopOnError bool
+	// RetryPending re-attempts the passages an earlier run left in the source
+	// language, instead of accepting a cached document as finished. Documents
+	// with nothing pending are still reused untouched.
+	RetryPending bool
 }
 
 // Book translates every document of the book in place. The book is modified,
@@ -167,11 +189,73 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 			continue
 		}
 
+		meta := DocMeta{BookTitle: book.Title, Title: res.Documents[i].Title, Index: i + 1, Total: len(names)}
+
 		if opts.Cache != nil {
 			if cached, ok := opts.Cache.Get(name); ok {
-				book.Replace(name, cached)
-				res.Documents[i].Status = StatusCached
-				report(i, "already translated, reused from the cache", nil)
+				pending, known := pendingOf(opts.Cache, name)
+				if !opts.RetryPending || !known || len(pending) == 0 {
+					book.Replace(name, cached)
+					res.Documents[i].Status = StatusCached
+					res.Documents[i].Pending = len(pending)
+					report(i, "déjà traduit, repris du cache", nil)
+					continue
+				}
+
+				// Only the passages that stayed in the source language are
+				// sent again; the rest of the chapter is already paid for.
+				res.Documents[i].Status = StatusRunning
+				res.Documents[i].TotalSegments = len(pending)
+				report(i, fmt.Sprintf("reprise de %d passage(s)", len(pending)), nil)
+
+				docStart := time.Now()
+				liveUsage, liveRequests, liveAttempted = llm.Usage{}, 0, 0
+				out, err := RetryPending(ctx, p, opts.Options, meta, name, doc, cached, pending, tail, func(e Event) {
+					res.Documents[i].DoneSegments = e.DoneSegments
+					res.Documents[i].TotalSegments = e.TotalSegments
+					liveUsage, liveRequests, liveAttempted = e.DocUsage, e.DocRequests, e.DocAttempted
+					report(i, e.Message, e.Retry)
+				})
+				liveUsage, liveRequests, liveAttempted = llm.Usage{}, 0, 0
+				res.Documents[i].Duration = time.Since(docStart)
+
+				if out != nil {
+					res.Usage.Add(out.Usage)
+					res.Requests += out.Requests
+					res.Attempted += out.Attempted
+					res.Notes = append(res.Notes, out.Notes...)
+					res.Documents[i].Notes = len(out.Notes)
+				}
+				if err != nil {
+					// The earlier translation is still good: keep it rather
+					// than lose a chapter over a failed touch-up.
+					book.Replace(name, cached)
+					res.Documents[i].Status = StatusCached
+					res.Documents[i].Pending = len(pending)
+					res.Notes = append(res.Notes, Note{Document: name, Message: "reprise impossible : " + err.Error()})
+					report(i, "", nil)
+					if ctx.Err() != nil {
+						return res, ctx.Err()
+					}
+					if errors.Is(err, ErrServiceUnusable) {
+						return res, fmt.Errorf("%s : %w", name, err)
+					}
+					continue
+				}
+
+				final := epub.SetDocumentLanguage(out.Output, opts.TargetCode)
+				book.Replace(name, final)
+				tail = out.Tail
+				res.Documents[i].Status = StatusDone
+				res.Documents[i].Translated = out.Translated
+				res.Documents[i].DoneSegments = len(pending)
+				res.Documents[i].TotalSegments = len(pending)
+				res.Documents[i].Pending = len(out.Pending)
+				storePending(opts.Cache, name, out.Pending)
+				if err := opts.Cache.Put(name, final); err != nil {
+					res.Notes = append(res.Notes, Note{Document: name, Message: "n'a pas pu être mis en cache : " + err.Error()})
+				}
+				report(i, "", nil)
 				continue
 			}
 		}
@@ -183,7 +267,6 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		report(i, "", nil)
 
 		docStart := time.Now()
-		meta := DocMeta{BookTitle: book.Title, Title: res.Documents[i].Title, Index: i + 1, Total: len(names)}
 		liveUsage, liveRequests, liveAttempted = llm.Usage{}, 0, 0
 		out, err := Document(ctx, p, opts.Options, meta, name, doc, tail, func(e Event) {
 			res.Documents[i].DoneSegments = e.DoneSegments
@@ -233,9 +316,11 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		res.Documents[i].Translated = out.Translated
 		res.Documents[i].DoneSegments = out.Segments
 		res.Documents[i].TotalSegments = out.Segments
+		res.Documents[i].Pending = len(out.Pending)
 
 		if opts.Cache != nil {
 			final, _ := book.Read(name)
+			storePending(opts.Cache, name, out.Pending)
 			if err := opts.Cache.Put(name, final); err != nil {
 				res.Notes = append(res.Notes, Note{Document: name, Message: "n'a pas pu être mis en cache : " + err.Error()})
 			}
@@ -248,4 +333,21 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 	}
 	res.Duration = time.Since(started)
 	return res, nil
+}
+
+// pendingOf reads the passages a cache remembers as untranslated. A cache that
+// cannot remember them reports "unknown", which is deliberately different from
+// "none": retrying on a guess would re-translate a whole book.
+func pendingOf(c Cache, key string) (pending []int, known bool) {
+	store, ok := c.(PendingStore)
+	if !ok {
+		return nil, false
+	}
+	return store.GetPending(key)
+}
+
+func storePending(c Cache, key string, indices []int) {
+	if store, ok := c.(PendingStore); ok {
+		_ = store.PutPending(key, indices)
+	}
 }

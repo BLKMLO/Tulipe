@@ -8,7 +8,6 @@ package translate
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -35,6 +34,10 @@ type Options struct {
 	Glossary string
 	// StyleNotes are free-form instructions appended to the system prompt.
 	StyleNotes string
+	// About describes the book in one sentence — its genre, period, subject.
+	// It settles register and the sense of ambiguous words. Empty disables it
+	// entirely: no sentence is added to the prompt.
+	About string
 
 	// ChunkChars caps the source characters sent in one request.
 	ChunkChars int
@@ -154,8 +157,12 @@ type DocResult struct {
 	Requests   int
 	Segments   int
 	Translated int
-	Notes      []Note
-	Tail       string // end of the translation, for continuity with the next document
+	// Pending lists the segments left in the source language, by index. A
+	// later pass can retry exactly those instead of paying for the chapter
+	// again.
+	Pending []int
+	Notes   []Note
+	Tail    string // end of the translation, for continuity with the next document
 }
 
 // Event reports progress inside a document.
@@ -216,10 +223,13 @@ type translator struct {
 	res      *DocResult
 	onEvent  func(Event)
 
-	tail     string // running end of the translation, for continuity
-	done     int
-	parts    int
-	part     int
+	tail  string // running end of the translation, for continuity
+	done  int
+	parts int
+	part  int
+	// numbers maps each entry of segs to its index in the whole document. It
+	// is nil for a full pass, where the two coincide.
+	numbers  []int
 	abortErr error // set when the guard trips; stops the whole document
 }
 
@@ -242,9 +252,28 @@ func (t *translator) emit(msg string, retry *llm.RetryNotice) {
 func (t *translator) note(idx int, format string, args ...any) {
 	t.res.Notes = append(t.res.Notes, Note{
 		Document: t.name,
-		Segment:  idx,
+		Segment:  t.segmentNumber(idx),
 		Message:  fmt.Sprintf(format, args...),
 	})
+}
+
+// keep records a segment that stayed in the source language: it is both worth
+// telling the user about and worth offering to retry later.
+func (t *translator) keep(idx int, format string, args ...any) {
+	t.note(idx, format, args...)
+	t.res.Pending = append(t.res.Pending, t.segmentNumber(idx))
+}
+
+// segmentNumber maps an index in t.segs back to its position in the whole
+// document. They differ during a retry pass, which works on a subset.
+func (t *translator) segmentNumber(idx int) int {
+	if t.numbers == nil {
+		return idx
+	}
+	if idx < 0 || idx >= len(t.numbers) {
+		return idx
+	}
+	return t.numbers[idx]
 }
 
 // run translates every segment, returning one string per segment. An empty
@@ -298,7 +327,7 @@ func (t *translator) translateRange(lo, hi int, out []string) {
 		return
 	}
 	if hi-lo == 1 {
-		t.note(lo, "laissé en langue source : %v", err)
+		t.keep(lo, "laissé en langue source : %v", err)
 		t.done++
 		t.emit("", nil)
 		return
@@ -318,16 +347,16 @@ func (t *translator) accept(lo, hi int, got []string, out []string) {
 
 		switch {
 		case strings.TrimSpace(tr) == "":
-			t.note(i, "traduction vide renvoyée par le modèle ; source conservée")
+			t.keep(i, "traduction vide renvoyée par le modèle ; source conservée")
 		case seg.Kind == epub.KindBlock && epub.WellFormed(seg.Source) == nil && epub.WellFormed(tr) != nil:
-			t.note(i, "balisage mal formé dans la traduction ; source conservée")
+			t.keep(i, "balisage mal formé dans la traduction ; source conservée")
 		case seg.Kind == epub.KindText && !strings.ContainsAny(seg.Source, "<>") && strings.ContainsAny(tr, "<>"):
 			// A plain-text span gets escaped on the way back in, so markup the
 			// model invented would show up as literal angle brackets to the
 			// reader. Keep the source instead.
-			t.note(i, "du balisage a été introduit dans du texte brut ; source conservée")
+			t.keep(i, "du balisage a été introduit dans du texte brut ; source conservée")
 		case len(tr) > 6*len(seg.Source)+200:
-			t.note(i, "traduction %d fois plus longue que la source ; source conservée", len(tr)/max(1, len(seg.Source)))
+			t.keep(i, "traduction %d fois plus longue que la source ; source conservée", len(tr)/max(1, len(seg.Source)))
 		default:
 			out[i] = tr
 			t.res.Translated++
@@ -425,14 +454,14 @@ func (t *translator) requestDirect(direct llm.DirectTranslator, lo, hi int, sour
 
 // requestPrompt instructs a chat model and reads the JSON it answers with.
 func (t *translator) requestPrompt(sources []string, splittable bool) ([]string, error) {
-	payload, err := json.Marshal(sources)
+	payload, err := encodeSegments(sources)
 	if err != nil {
 		return nil, err
 	}
 
 	req := llm.Request{
 		System:    t.systemPrompt(),
-		User:      t.userPrompt(string(payload), len(sources)),
+		User:      t.userPrompt(payload, len(sources)),
 		MaxTokens: t.opts.MaxTokens,
 		Schema:    responseSchema,
 	}

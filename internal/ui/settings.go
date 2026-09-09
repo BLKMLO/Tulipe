@@ -188,6 +188,12 @@ func settingsFields() []field {
 			set:  func(c *config.Config, v string) error { c.OutputDir = strings.TrimSpace(v); return nil },
 		},
 		{
+			label: "Contexte du livre", kind: fieldText,
+			help: "une phrase sur le sujet, l'époque ou le genre — elle cale le registre et le sens des mots ambigus ; vide, rien n'est ajouté au prompt",
+			get:  func(c config.Config) string { return oneLine(c.About) },
+			set:  func(c *config.Config, v string) error { c.About = strings.TrimSpace(v); return nil },
+		},
+		{
 			label: "Glossaire", kind: fieldText,
 			help: "une règle « source = cible » par ligne ; pour un glossaire long, éditer glossary dans " + config.Path(),
 			get:  func(c config.Config) string { return oneLine(c.Glossary) },
