@@ -2,7 +2,9 @@ package translate
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"strings"
 )
 
@@ -101,7 +103,7 @@ type translationEnvelope struct {
 func parseTranslations(text string) ([]string, error) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return nil, fmt.Errorf("réponse vide du modèle")
+		return nil, errors.New(i18n.T("translate.err.empty-answer"))
 	}
 
 	var env translationEnvelope
@@ -129,7 +131,7 @@ func parseTranslations(text string) ([]string, error) {
 			return bare, nil
 		}
 	}
-	return nil, fmt.Errorf("la réponse du modèle n'est pas le JSON attendu : %s", excerpt(trimmed))
+	return nil, fmt.Errorf(i18n.T("translate.err.not-json"), excerpt(trimmed))
 }
 
 func stripCodeFence(s string) string {

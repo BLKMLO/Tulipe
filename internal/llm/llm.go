@@ -11,6 +11,8 @@ import (
 	"math/rand/v2"
 	"strings"
 	"time"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
 )
 
 // Request is one completion call.
@@ -128,9 +130,18 @@ func (e *APIError) Retryable() bool {
 	return e.Status >= 500
 }
 
+// messageError is a sentinel whose text is looked up when it is read, not when
+// the program starts. A package-level errors.New would freeze its wording in
+// whatever language happened to be current at initialisation — that is, always
+// the default one.
+type messageError struct{ key string }
+
+func (e messageError) Error() string { return i18n.T(e.key) }
+
 // ErrTruncated means the model hit its output ceiling before finishing. The
-// answer is unusable; the caller should retry with fewer segments.
-var ErrTruncated = errors.New("le modèle a atteint sa limite de sortie avant d'avoir fini")
+// answer is unusable; the caller should retry with fewer segments. It stays
+// comparable, so errors.Is keeps working.
+var ErrTruncated error = messageError{"llm.err.truncated"}
 
 // RefusalError means the model declined to answer.
 type RefusalError struct {
@@ -139,7 +150,7 @@ type RefusalError struct {
 }
 
 func (e *RefusalError) Error() string {
-	msg := "le modèle a refusé de traduire ce passage"
+	msg := i18n.T("llm.err.refusal")
 	if e.Category != "" {
 		msg += " (" + e.Category + ")"
 	}

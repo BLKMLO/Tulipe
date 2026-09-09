@@ -10,6 +10,7 @@ import (
 
 	"github.com/blkmlo/tulipe/internal/config"
 	"github.com/blkmlo/tulipe/internal/epub"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/blkmlo/tulipe/internal/translate"
 )
@@ -56,7 +57,7 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 			fmt.Fprintf(os.Stderr, format+"\n", args...)
 		}
 	}
-	log("tulipe — %s → %s (%s via %s)", orDash(book.Title), cfg.TargetLanguage, cfg.Model, cfg.Provider)
+	log(i18n.T("cli.headless.header"), orDash(book.Title), cfg.TargetLanguage, cfg.Model, cfg.Provider)
 
 	seen := map[int]translate.Status{}
 	res, err := translate.Book(ctx, provider, book, opts, func(p translate.Progress) {
@@ -67,22 +68,22 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 			seen[i] = d.Status
 			switch d.Status {
 			case translate.StatusRunning:
-				log("  … %s (%d segments)", d.Title, d.TotalSegments)
+				log(i18n.T("cli.headless.running"), d.Title, d.TotalSegments)
 			case translate.StatusDone:
-				log("  ✓ %s — %d segments en %s", d.Title, d.TotalSegments, d.Duration.Round(time.Second))
+				log(i18n.T("cli.headless.done"), d.Title, d.TotalSegments, d.Duration.Round(time.Second))
 			case translate.StatusCached:
-				log("  ◆ %s — réutilisé du cache", d.Title)
+				log(i18n.T("cli.headless.cached"), d.Title)
 			case translate.StatusFailed:
-				log("  ✗ %s — %v", d.Title, d.Err)
+				log(i18n.T("cli.headless.failed"), d.Title, d.Err)
 			}
 		}
 		if p.Retry != nil {
-			log("    nouvelle tentative %d dans %s — %v", p.Retry.Attempt, p.Retry.Wait.Round(time.Second), p.Retry.Err)
+			log(i18n.T("cli.headless.retry"), p.Retry.Attempt, p.Retry.Wait.Round(time.Second), p.Retry.Err)
 		}
 	})
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			log("interrompu — les documents déjà traduits sont conservés pour une reprise")
+			log(i18n.T("cli.headless.cancelled"))
 		}
 		return err
 	}
@@ -96,18 +97,18 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 	failed := res.Failed()
 
 	log("")
-	log("segments  %s", segmentsPlain(translated, total))
+	log(i18n.T("cli.headless.segments"), segmentsPlain(translated, total))
 	if p := res.Pending(); p > 0 {
-		log("en attente %d passage(s) laissés en langue source — « tulipe translate --retry » pour les reprendre", p)
+		log(i18n.T("cli.headless.pending"), p)
 	}
-	log("requêtes  %s", requestsPlain(res.Requests, res.Attempted))
-	log("jetons    %s", usagePlain(res.Usage, res.Attempted))
-	log("durée     %s", res.Duration.Round(time.Second))
+	log(i18n.T("cli.headless.requests"), requestsPlain(res.Requests, res.Attempted))
+	log(i18n.T("cli.headless.tokens"), usagePlain(res.Usage, res.Attempted))
+	log(i18n.T("cli.headless.duration"), res.Duration.Round(time.Second))
 	if n := len(res.Notes); n > 0 {
-		log("signalés  %d passage(s) laissés en langue source :", n)
+		log(i18n.T("cli.headless.notes"), n)
 		for i, note := range res.Notes {
 			if i == 20 {
-				log("          … et %d autres", n-20)
+				log(i18n.T("cli.headless.notes.more"), n-20)
 				break
 			}
 			log("          %s", note)
@@ -122,11 +123,11 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 		for _, d := range failed {
 			names = append(names, fmt.Sprintf("%s (%v)", d.Title, d.Err))
 		}
-		return fmt.Errorf("%d document(s) non traduits, le fichier produit les contient en langue source : %s",
+		return fmt.Errorf(i18n.T("cli.headless.err.failed"),
 			len(failed), strings.Join(names, " ; "))
 	}
 	if total > 0 && translated == 0 {
-		return errors.New("aucun segment n'a été traduit ; le fichier produit est une copie de la source")
+		return errors.New(i18n.T("cli.headless.err.none"))
 	}
 	return nil
 }
@@ -136,27 +137,27 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 // failure.
 func segmentsPlain(translated, total int) string {
 	if total == 0 {
-		return "aucun à traduire lors de cette passe"
+		return i18n.T("ui.segments.none")
 	}
-	return fmt.Sprintf("%d traduits sur %d", translated, total)
+	return i18n.T("ui.segments.count", translated, total)
 }
 
 func requestsPlain(requests, attempted int) string {
 	if attempted == 0 {
-		return "aucune — tout venait du cache de reprise"
+		return i18n.T("ui.requests.none")
 	}
 	if attempted == requests {
 		return fmt.Sprintf("%d", requests)
 	}
-	return fmt.Sprintf("%d réussies sur %d appels", requests, attempted)
+	return i18n.T("ui.requests.mixed", requests, attempted)
 }
 
 func usagePlain(u llm.Usage, attempted int) string {
 	if attempted == 0 {
-		return "aucun appel"
+		return i18n.T("ui.usage.no-call")
 	}
 	if !u.Reported {
-		return "non communiqués par le fournisseur"
+		return i18n.T("ui.usage.not-reported")
 	}
-	return fmt.Sprintf("%d entrants, %d sortants", u.InputTokens, u.OutputTokens)
+	return i18n.T("ui.usage.in-out.plain", u.InputTokens, u.OutputTokens)
 }

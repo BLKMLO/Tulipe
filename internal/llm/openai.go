@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
 )
 
 // OpenAICompatOptions configures a backend that speaks the OpenAI
@@ -41,10 +44,10 @@ type OpenAICompat struct {
 func NewOpenAICompat(o OpenAICompatOptions) (*OpenAICompat, error) {
 	base := strings.TrimRight(strings.TrimSpace(o.BaseURL), "/")
 	if base == "" {
-		return nil, fmt.Errorf("un service compatible OpenAI exige une URL de base (par exemple http://localhost:11434/v1)")
+		return nil, errors.New(i18n.T("llm.err.openai-needs-base-url"))
 	}
 	if strings.TrimSpace(o.Model) == "" {
-		return nil, fmt.Errorf("un service compatible OpenAI exige un nom de modèle")
+		return nil, errors.New(i18n.T("llm.err.openai-needs-model"))
 	}
 	timeout := o.Timeout
 	if timeout <= 0 {
@@ -161,7 +164,7 @@ func (p *OpenAICompat) call(ctx context.Context, req Request, wantJSON bool) (*R
 		return nil, e
 	}
 	if len(parsed.Choices) == 0 {
-		return nil, fmt.Errorf("le service n'a renvoyé aucune réponse : %s", summarise(string(raw)))
+		return nil, fmt.Errorf(i18n.T("llm.err.no-answer"), summarise(string(raw)))
 	}
 	choice := parsed.Choices[0]
 	if choice.FinishReason == "length" {
@@ -257,7 +260,7 @@ func (p *OpenAICompat) ListModels(ctx context.Context) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("le service n'a listé aucun modèle : %s", summarise(string(raw)))
+		return nil, fmt.Errorf(i18n.T("llm.err.no-models-from-service"), summarise(string(raw)))
 	}
 	sort.Strings(out)
 	return slices.Compact(out), nil

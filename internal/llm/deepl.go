@@ -4,11 +4,14 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
 )
 
 // DeepLOptions configures the DeepL backend.
@@ -43,7 +46,7 @@ const FreeKeySuffix = ":fx"
 func NewDeepL(o DeepLOptions) (*DeepL, error) {
 	key := strings.TrimSpace(o.APIKey)
 	if key == "" {
-		return nil, fmt.Errorf("DeepL exige une clé d'authentification")
+		return nil, errors.New(i18n.T("llm.err.deepl-needs-key"))
 	}
 	base := strings.TrimRight(strings.TrimSpace(o.BaseURL), "/")
 	if base == "" {
@@ -74,7 +77,7 @@ func (d *DeepL) Model() string { return "deepl" }
 // Complete implements Provider. DeepL is not a chat service, so the prompt path
 // is refused outright rather than faked.
 func (d *DeepL) Complete(context.Context, Request) (*Response, error) {
-	return nil, fmt.Errorf("DeepL ne répond pas à des instructions libres ; il traduit des segments")
+	return nil, errors.New(i18n.T("llm.err.deepl-no-prompting"))
 }
 
 type deeplRequest struct {
@@ -101,7 +104,7 @@ func (d *DeepL) TranslateSegments(ctx context.Context, req SegmentRequest) (*Seg
 	}
 	target := DeepLLanguage(req.TargetCode)
 	if target == "" {
-		return nil, fmt.Errorf("DeepL exige un code de langue cible ; renseignez « Code de langue » dans les réglages")
+		return nil, errors.New(i18n.T("llm.err.deepl-needs-code"))
 	}
 
 	body := deeplRequest{
@@ -150,12 +153,12 @@ func (d *DeepL) TranslateSegments(ctx context.Context, req SegmentRequest) (*Seg
 		// going to clear on a retry within this run.
 		if resp.StatusCode == 456 {
 			return nil, &APIError{Provider: KindDeepL, Status: 403,
-				Message: "quota de caractères DeepL épuisé : " + msg}
+				Message: i18n.T("llm.err.deepl-quota", msg)}
 		}
 		return nil, &APIError{Provider: KindDeepL, Status: resp.StatusCode, Message: summarise(msg)}
 	}
 	if len(parsed.Translations) != len(req.Segments) {
-		return nil, fmt.Errorf("DeepL a renvoyé %d traductions pour %d segments",
+		return nil, fmt.Errorf(i18n.T("llm.err.deepl-count"),
 			len(parsed.Translations), len(req.Segments))
 	}
 

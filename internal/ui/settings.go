@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/blkmlo/tulipe/internal/config"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -53,14 +54,27 @@ func newSettingsForm(cfg config.Config) settingsForm {
 func settingsFields() []field {
 	return []field{
 		{
-			label: "Service", kind: fieldChoice, choices: llm.PresetIDs(),
-			help: "« m » interroge le service pour la liste de ses modèles ; « tulipe providers » détaille chaque entrée",
+			// The interface language comes first because it decides how every
+			// other line on this screen reads.
+			label: i18n.T("ui.field.interface-language"), kind: fieldChoice, choices: i18n.LocaleNames(),
+			help: i18n.T("ui.field.interface-language.help"),
+			get:  func(c config.Config) string { return i18n.LocaleName(c.Language) },
+			set: func(c *config.Config, v string) error {
+				if code, ok := i18n.LocaleByName(v); ok {
+					c.Language = code
+				}
+				return nil
+			},
+		},
+		{
+			label: i18n.T("ui.field.service"), kind: fieldChoice, choices: llm.PresetIDs(),
+			help: i18n.T("ui.field.service.help"),
 			get:  func(c config.Config) string { return c.Provider },
 			set: func(c *config.Config, v string) error {
 				c.Provider = v
 				preset, ok := llm.LookupPreset(v)
 				if !ok {
-					return fmt.Errorf("service inconnu %q", v)
+					return fmt.Errorf(i18n.T("ui.settings.unknown-service"), v)
 				}
 				// Carry the preset's endpoint over, unless the user typed one
 				// of their own.
@@ -74,32 +88,32 @@ func settingsFields() []field {
 			},
 		},
 		{
-			label: "Modèle", kind: fieldText,
-			help: "identifiant exact du modèle",
+			label: i18n.T("ui.field.model"), kind: fieldText,
+			help: i18n.T("ui.field.model.help"),
 			get:  func(c config.Config) string { return c.Model },
 			set:  func(c *config.Config, v string) error { c.Model = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Effort", kind: fieldChoice, choices: config.Efforts, only: llm.KindAnthropic,
-			help: "profondeur de réflexion du modèle : plus haut traduit mieux les passages difficiles et coûte plus cher",
+			label: i18n.T("ui.field.effort"), kind: fieldChoice, choices: config.Efforts, only: llm.KindAnthropic,
+			help: i18n.T("ui.field.effort.help"),
 			get:  func(c config.Config) string { return c.Effort },
 			set:  func(c *config.Config, v string) error { c.Effort = v; return nil },
 		},
 		{
-			label: "URL de base", kind: fieldText,
-			help: "obligatoire pour un serveur compatible OpenAI, par exemple http://localhost:11434/v1 ; vide sinon",
+			label: i18n.T("ui.field.base-url"), kind: fieldText,
+			help: i18n.T("ui.field.base-url.help"),
 			get:  func(c config.Config) string { return c.BaseURL },
 			set:  func(c *config.Config, v string) error { c.BaseURL = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Clé API", kind: fieldText, secret: true,
-			help: "laisser vide et utiliser la variable d'environnement est plus sûr : la clé ne touche jamais le disque",
+			label: i18n.T("ui.field.api-key"), kind: fieldText, secret: true,
+			help: i18n.T("ui.field.api-key.help"),
 			get:  func(c config.Config) string { return c.KeyStatus() },
 			set:  func(c *config.Config, v string) error { c.APIKey = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Langue cible", kind: fieldChoice, choices: languageNames(),
-			help: "nom de la langue tel qu'un humain l'écrirait ; le code BCP 47 correspondant est inscrit dans les métadonnées du livre",
+			label: i18n.T("ui.field.target-language"), kind: fieldChoice, choices: languageNames(),
+			help: i18n.T("ui.field.target-language.help"),
 			get:  func(c config.Config) string { return c.TargetLanguage },
 			set: func(c *config.Config, v string) error {
 				c.TargetLanguage = v
@@ -110,98 +124,98 @@ func settingsFields() []field {
 			},
 		},
 		{
-			label: "Code de langue", kind: fieldText,
-			help: "étiquette BCP 47 écrite dans <dc:language> ; vide laisse la métadonnée d'origine",
+			label: i18n.T("ui.field.language-code"), kind: fieldText,
+			help: i18n.T("ui.field.language-code.help"),
 			get:  func(c config.Config) string { return c.TargetCode },
 			set:  func(c *config.Config, v string) error { c.TargetCode = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Langue source", kind: fieldText,
-			help: "vide laisse le modèle la reconnaître",
+			label: i18n.T("ui.field.source-language"), kind: fieldText,
+			help: i18n.T("ui.field.source-language.help"),
 			get:  func(c config.Config) string { return c.SourceLanguage },
 			set:  func(c *config.Config, v string) error { c.SourceLanguage = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Code de langue source", kind: fieldText,
-			help: "étiquette BCP 47 de la source ; DeepL s'en sert, vide lui laisse la détecter",
+			label: i18n.T("ui.field.source-code"), kind: fieldText,
+			help: i18n.T("ui.field.source-code.help"),
 			get:  func(c config.Config) string { return c.SourceCode },
 			set:  func(c *config.Config, v string) error { c.SourceCode = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Caractères par requête", kind: fieldInt,
-			help: "taille maximale d'un lot de segments ; c'est ce réglage qui empêche le contexte de déborder",
+			label: i18n.T("ui.field.chunk"), kind: fieldInt,
+			help: i18n.T("ui.field.chunk.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.ChunkChars) },
 			set:  setInt(func(c *config.Config, n int) { c.ChunkChars = n }, 200, 200000),
 		},
 		{
-			label: "Segments par requête", kind: fieldInt,
-			help: "second plafond, en nombre de paragraphes",
+			label: i18n.T("ui.field.max-segments"), kind: fieldInt,
+			help: i18n.T("ui.field.max-segments.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.MaxSegments) },
 			set:  setInt(func(c *config.Config, n int) { c.MaxSegments = n }, 1, 500),
 		},
 		{
-			label: "Jetons de réponse", kind: fieldInt,
-			help: "plafond de la réponse du modèle ; trop bas, la traduction est coupée et le lot est redécoupé",
+			label: i18n.T("ui.field.max-tokens"), kind: fieldInt,
+			help: i18n.T("ui.field.max-tokens.help"),
 			get:  func(c config.Config) string { return strconv.FormatInt(c.MaxTokens, 10) },
 			set:  setInt(func(c *config.Config, n int) { c.MaxTokens = int64(n) }, 512, 200000),
 		},
 		{
-			label: "Tentatives", kind: fieldInt,
-			help: "nombre d'essais avant de redécouper un lot en deux",
+			label: i18n.T("ui.field.attempts"), kind: fieldInt,
+			help: i18n.T("ui.field.attempts.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.Attempts) },
 			set:  setInt(func(c *config.Config, n int) { c.Attempts = n }, 1, 12),
 		},
 		{
-			label: "Délai par appel (s)", kind: fieldInt,
-			help: "au-delà, l'appel est abandonné et réessayé ; empêche un service muet de bloquer la traduction",
+			label: i18n.T("ui.field.timeout"), kind: fieldInt,
+			help: i18n.T("ui.field.timeout.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.TimeoutSeconds) },
 			set:  setInt(func(c *config.Config, n int) { c.TimeoutSeconds = n }, 5, 3600),
 		},
 		{
-			label: "Continuité", kind: fieldInt,
-			help: "caractères de la traduction précédente montrés au modèle pour tenir le ton et le vocabulaire",
+			label: i18n.T("ui.field.context"), kind: fieldInt,
+			help: i18n.T("ui.field.context.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.ContextChars) },
 			set:  setInt(func(c *config.Config, n int) { c.ContextChars = n }, 0, 4000),
 		},
 		{
-			label: "Sortie structurée", kind: fieldBool,
-			help: "contraint la réponse à un schéma JSON ; désactivé automatiquement si le service la refuse",
+			label: i18n.T("ui.field.structured"), kind: fieldBool,
+			help: i18n.T("ui.field.structured.help"),
 			get:  func(c config.Config) string { return boolLabel(c.StructuredOutput) },
 			set:  setBool(func(c *config.Config, b bool) { c.StructuredOutput = b }),
 		},
 		{
-			label: "Reprise", kind: fieldBool,
-			help: "conserve les chapitres traduits pour ne jamais les repayer après une interruption",
+			label: i18n.T("ui.field.resume"), kind: fieldBool,
+			help: i18n.T("ui.field.resume.help"),
 			get:  func(c config.Config) string { return boolLabel(c.Resume) },
 			set:  setBool(func(c *config.Config, b bool) { c.Resume = b }),
 		},
 		{
-			label: "Format de sortie", kind: fieldChoice, choices: config.Formats,
-			help: "epub conserve la mise en forme, les images et la table des matières ; txt ne garde que la prose",
+			label: i18n.T("ui.field.format"), kind: fieldChoice, choices: config.Formats,
+			help: i18n.T("ui.field.format.help"),
 			get:  func(c config.Config) string { return c.Format },
 			set:  func(c *config.Config, v string) error { c.Format = v; return nil },
 		},
 		{
-			label: "Dossier de sortie", kind: fieldText,
-			help: "vide écrit à côté du livre d'origine",
+			label: i18n.T("ui.field.output-dir"), kind: fieldText,
+			help: i18n.T("ui.field.output-dir.help"),
 			get:  func(c config.Config) string { return c.OutputDir },
 			set:  func(c *config.Config, v string) error { c.OutputDir = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Contexte du livre", kind: fieldText,
-			help: "une phrase sur le sujet, l'époque ou le genre — elle cale le registre et le sens des mots ambigus ; vide, rien n'est ajouté au prompt",
+			label: i18n.T("ui.field.about"), kind: fieldText,
+			help: i18n.T("ui.field.about.help"),
 			get:  func(c config.Config) string { return oneLine(c.About) },
 			set:  func(c *config.Config, v string) error { c.About = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: "Glossaire", kind: fieldText,
-			help: "une règle « source = cible » par ligne ; pour un glossaire long, éditer glossary dans " + config.Path(),
+			label: i18n.T("ui.field.glossary"), kind: fieldText,
+			help: i18n.T("ui.field.glossary.help", config.Path()),
 			get:  func(c config.Config) string { return oneLine(c.Glossary) },
 			set:  func(c *config.Config, v string) error { c.Glossary = v; return nil },
 		},
 		{
-			label: "Consignes de style", kind: fieldText,
-			help: "ajoutées telles quelles aux instructions du traducteur",
+			label: i18n.T("ui.field.style"), kind: fieldText,
+			help: i18n.T("ui.field.style.help"),
 			get:  func(c config.Config) string { return oneLine(c.StyleNotes) },
 			set:  func(c *config.Config, v string) error { c.StyleNotes = v; return nil },
 		},
@@ -212,10 +226,10 @@ func setInt(apply func(*config.Config, int), lo, hi int) func(*config.Config, st
 	return func(c *config.Config, v string) error {
 		n, err := strconv.Atoi(strings.TrimSpace(v))
 		if err != nil {
-			return fmt.Errorf("%q n'est pas un nombre entier", v)
+			return fmt.Errorf(i18n.T("ui.settings.not-an-int"), v)
 		}
 		if n < lo || n > hi {
-			return fmt.Errorf("valeur attendue entre %d et %d", lo, hi)
+			return fmt.Errorf(i18n.T("ui.settings.out-of-range"), lo, hi)
 		}
 		apply(c, n)
 		return nil
@@ -224,16 +238,16 @@ func setInt(apply func(*config.Config, int), lo, hi int) func(*config.Config, st
 
 func setBool(apply func(*config.Config, bool)) func(*config.Config, string) error {
 	return func(c *config.Config, v string) error {
-		apply(c, v == "oui")
+		apply(c, v == i18n.T("ui.yes"))
 		return nil
 	}
 }
 
 func boolLabel(b bool) string {
 	if b {
-		return "oui"
+		return i18n.T("ui.yes")
 	}
-	return "non"
+	return i18n.T("ui.no")
 }
 
 func languageNames() []string {
@@ -308,7 +322,7 @@ func (m Model) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
 		if f.dirty {
-			m.notice, m.noticeOK = "Réglages non enregistrés — « s » pour enregistrer, « échap » à nouveau pour abandonner.", false
+			m.notice, m.noticeOK = i18n.T("ui.settings.unsaved.warn"), false
 			f.dirty = false
 			return m, nil
 		}
@@ -331,9 +345,13 @@ func (m Model) updateSettings(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.cfg = f.cfg
+		// The language takes effect on save, not while the choice is being
+		// cycled: abandoning the screen must leave the interface as it was.
+		i18n.SetLocale(m.cfg.Language)
 		m.menu = buildMenu()
+		f.fields = settingsFields()
 		f.dirty = false
-		m.notice, m.noticeOK = "Réglages enregistrés dans "+config.Path(), true
+		m.notice, m.noticeOK = i18n.T("ui.settings.saved", config.Path()), true
 	case "left", "h":
 		if fd.kind == fieldChoice || fd.kind == fieldBool {
 			m.cycleChoice(fd, -1)
@@ -364,7 +382,7 @@ func (m *Model) cycleChoice(fd field, step int) {
 	f := &m.settings
 	choices := fd.choices
 	if fd.kind == fieldBool {
-		choices = []string{"non", "oui"}
+		choices = []string{i18n.T("ui.no"), i18n.T("ui.yes")}
 	}
 	current := fd.get(f.cfg)
 	pos := 0
@@ -384,7 +402,7 @@ func (m *Model) cycleChoice(fd field, step int) {
 func (m Model) viewSettings() string {
 	f := m.settings
 	var b strings.Builder
-	b.WriteString(header("réglages") + "\n\n")
+	b.WriteString(header(i18n.T("ui.settings.title")) + "\n\n")
 
 	vis := f.visible()
 	for i, idx := range vis {
@@ -395,7 +413,7 @@ func (m Model) viewSettings() string {
 			value = "‹ " + value + " ›"
 		}
 		if value == "" {
-			value = dimStyle.Render("—")
+			value = dimStyle.Render(i18n.T("ui.dash"))
 		}
 		if selected && f.editing {
 			b.WriteString(accentStyle.Render("› ") + accentStyle.Bold(true).Render(pad(fd.label, 22)) + f.input.View() + "\n")
@@ -418,12 +436,18 @@ func (m Model) viewSettings() string {
 	}
 
 	if f.dirty {
-		b.WriteString("\n\n" + warnStyle.Render("modifications non enregistrées"))
+		b.WriteString("\n\n" + warnStyle.Render(i18n.T("ui.settings.unsaved")))
 	}
 	if f.editing {
-		b.WriteString("\n\n" + help("entrée", "valider", "échap", "annuler la saisie"))
+		b.WriteString("\n\n" + help(i18n.T("ui.key.enter"), i18n.T("ui.act.confirm"), i18n.T("ui.key.esc"), i18n.T("ui.act.cancel-edit")))
 	} else {
-		b.WriteString("\n\n" + help("↑/↓", "champ", "←/→", "changer", "entrée", "modifier", "m", "modèles", "s", "enregistrer", "échap", "retour"))
+		b.WriteString("\n\n" + help(
+			i18n.T("ui.key.up-down"), i18n.T("ui.act.field"),
+			"←/→", i18n.T("ui.act.change"),
+			i18n.T("ui.key.enter"), i18n.T("ui.act.edit"),
+			"m", i18n.T("ui.act.models"),
+			"s", i18n.T("ui.act.save"),
+			i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 	}
 	return b.String()
 }
