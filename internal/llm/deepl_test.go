@@ -90,7 +90,7 @@ func TestDeepLReportsACountMismatch(t *testing.T) {
 	_, err := d.TranslateSegments(context.Background(), SegmentRequest{
 		Segments: []string{"a", "b"}, TargetCode: "fr",
 	})
-	if err == nil || !strings.Contains(err.Error(), "1 traductions") {
+	if err == nil || !strings.Contains(err.Error(), "1 translations") {
 		t.Errorf("err = %v, want a count mismatch", err)
 	}
 }
@@ -175,7 +175,7 @@ func TestDeepLLanguageMapping(t *testing.T) {
 func TestDeepLNeedsATargetCode(t *testing.T) {
 	d, _ := NewDeepL(DeepLOptions{APIKey: "k"})
 	_, err := d.TranslateSegments(context.Background(), SegmentRequest{Segments: []string{"a"}})
-	if err == nil || !strings.Contains(err.Error(), "code de langue") {
+	if err == nil || !strings.Contains(err.Error(), "target language code") {
 		t.Errorf("err = %v, want a complaint about the missing language code", err)
 	}
 }

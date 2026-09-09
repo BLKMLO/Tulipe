@@ -1,6 +1,10 @@
 package ui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"github.com/charmbracelet/lipgloss"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
+)
 
 // The palette is adaptive: every colour has a variant for light and dark
 // terminals, so Tulipe stays readable whatever the user's theme.
@@ -59,6 +63,13 @@ func header(sub string) string {
 		return title
 	}
 	return title + subtitleStyle.Render("  ·  "+sub)
+}
+
+// lbl renders a field label padded to a fixed column. The padding is applied
+// after translation, not written into the string: a label is not the same
+// length in every language, and the column has to line up in all of them.
+func lbl(key string, width int) string {
+	return labelStyle.Render(pad(i18n.T(key), width))
 }
 
 // help renders the key hints at the bottom of a screen.

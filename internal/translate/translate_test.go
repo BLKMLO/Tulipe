@@ -236,7 +236,7 @@ func TestMarkupChangeIsAcceptedButNoted(t *testing.T) {
 	}
 	var found bool
 	for _, n := range res.Notes {
-		if strings.Contains(n.Message, "balisage modifié") {
+		if strings.Contains(n.Message, "markup changed") {
 			found = true
 		}
 	}

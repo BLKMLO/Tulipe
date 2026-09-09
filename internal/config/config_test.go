@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 )
 
@@ -15,23 +16,25 @@ func TestValidateRejectsWhatItCannotDo(t *testing.T) {
 		tweak func(*Config)
 		want  string
 	}{
-		{"fournisseur inconnu", func(c *Config) { c.Provider = "telepathie" }, "fournisseur inconnu"},
-		{"format inconnu", func(c *Config) { c.Format = "pdf" }, "format de sortie inconnu"},
-		{"url à compléter", func(c *Config) { c.Provider = "cloudflare" }, "à compléter"},
-		{"deepl sans code", func(c *Config) { c.Provider = "deepl"; c.TargetCode = "" }, "code de langue cible"},
-		{"modèle vide", func(c *Config) { c.Model = "  " }, "aucun modèle"},
-		{"langue vide", func(c *Config) { c.TargetLanguage = "" }, "aucune langue"},
-		{"effort inventé", func(c *Config) { c.Effort = "enorme" }, "effort inconnu"},
-		{"chunk négatif", func(c *Config) { c.ChunkChars = -50 }, "--chunk"},
-		{"chunk nul", func(c *Config) { c.ChunkChars = 0 }, "--chunk"},
-		{"segments nuls", func(c *Config) { c.MaxSegments = 0 }, "--max-segments"},
-		{"jetons nuls", func(c *Config) { c.MaxTokens = 0 }, "--max-tokens"},
-		{"tentatives nulles", func(c *Config) { c.Attempts = 0 }, "--attempts"},
-		{"continuité négative", func(c *Config) { c.ContextChars = -1 }, "--context"},
-		{"url sans schéma", func(c *Config) { c.BaseURL = "localhost:11434" }, "URL de base invalide"},
-		{"url en ftp", func(c *Config) { c.BaseURL = "ftp://x/v1" }, "seuls http et https"},
-		{"openai sans url", func(c *Config) { c.Provider = ProviderOpenAI; c.BaseURL = "" }, "URL de base"},
-		{"sortie inexistante", func(c *Config) { c.OutputDir = "/nexiste/pas/du/tout" }, "dossier de sortie"},
+		{"unknown provider", func(c *Config) { c.Provider = "telepathie" }, "unknown provider"},
+		{"unknown format", func(c *Config) { c.Format = "pdf" }, "unknown output format"},
+		{"url to complete", func(c *Config) { c.Provider = "cloudflare" }, "field to fill in"},
+		{"deepl without a code", func(c *Config) { c.Provider = "deepl"; c.TargetCode = "" }, "target language code"},
+		{"empty model", func(c *Config) { c.Model = "  " }, "no model"},
+		{"empty language", func(c *Config) { c.TargetLanguage = "" }, "no target language"},
+		{"invented effort", func(c *Config) { c.Effort = "enorme" }, "unknown effort"},
+		{"negative chunk", func(c *Config) { c.ChunkChars = -50 }, "--chunk"},
+		{"zero chunk", func(c *Config) { c.ChunkChars = 0 }, "--chunk"},
+		{"zero segments", func(c *Config) { c.MaxSegments = 0 }, "--max-segments"},
+		{"zero tokens", func(c *Config) { c.MaxTokens = 0 }, "--max-tokens"},
+		{"zero attempts", func(c *Config) { c.Attempts = 0 }, "--attempts"},
+		{"negative continuity", func(c *Config) { c.ContextChars = -1 }, "--context"},
+		{"url without a scheme", func(c *Config) { c.BaseURL = "localhost:11434" }, "invalid base URL"},
+		{"ftp url", func(c *Config) { c.BaseURL = "ftp://x/v1" }, "only http and https"},
+		{"openai without a url", func(c *Config) { c.Provider = ProviderOpenAI; c.BaseURL = "" }, "base URL"},
+		{"missing output folder", func(c *Config) { c.OutputDir = "/nexiste/pas/du/tout" }, "output folder"},
+		{"unknown interface language", func(c *Config) { c.Language = "klingon" }, "unknown interface language"},
+		{"unknown interface language", func(c *Config) { c.Language = "kl" }, "unknown interface language"},
 	}
 	for _, c := range cases {
 		cfg := Default()
@@ -73,7 +76,7 @@ func TestValidateRejectsAFileAsOutputDirectory(t *testing.T) {
 	}
 	cfg := Default()
 	cfg.OutputDir = f
-	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "n'est pas un dossier") {
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "is not a folder") {
 		t.Errorf("Validate() = %v, want a complaint that it is not a directory", err)
 	}
 }
@@ -227,7 +230,7 @@ func TestKeyStatusNamesTheExpectedVariable(t *testing.T) {
 		t.Errorf("KeyStatus = %q, want it to name the variable to set", status)
 	}
 	cfg.Provider = "ollama"
-	if status := cfg.KeyStatus(); !strings.Contains(status, "inutile") {
+	if status := cfg.KeyStatus(); !strings.Contains(status, "not needed") {
 		t.Errorf("KeyStatus = %q, want it to say no key is needed locally", status)
 	}
 }
@@ -344,18 +347,18 @@ func TestValidateCapsFreeTextFields(t *testing.T) {
 		"--from":       func(c *Config, v string) { c.SourceLanguage = v },
 		"--about":      func(c *Config, v string) { c.About = v },
 		"--style":      func(c *Config, v string) { c.StyleNotes = v },
-		"le glossaire": func(c *Config, v string) { c.Glossary = v },
+		"the glossary": func(c *Config, v string) { c.Glossary = v },
 	}
 	for name, set := range cases {
 		cfg := Default()
 		set(&cfg, strings.Repeat("é", 300000))
 		err := cfg.Validate()
 		if err == nil {
-			t.Errorf("%s : une valeur de 300 000 caractères est acceptée", name)
+			t.Errorf("%s: a 300,000-character value is accepted", name)
 			continue
 		}
 		if !strings.Contains(err.Error(), name) {
-			t.Errorf("%s : le message ne nomme pas le champ : %v", name, err)
+			t.Errorf("%s: the message does not name the field: %v", name, err)
 		}
 	}
 
@@ -364,6 +367,82 @@ func TestValidateCapsFreeTextFields(t *testing.T) {
 	cfg.About = "un roman noir new-yorkais des années 1950"
 	cfg.Glossary = strings.Repeat("Victory Mansions = Maison de la Victoire\n", 500)
 	if err := cfg.Validate(); err != nil {
-		t.Errorf("une configuration raisonnable est refusée : %v", err)
+		t.Errorf("a reasonable configuration is refused: %v", err)
+	}
+}
+
+// TestInterfaceLanguageDefaultsToEnglishAndKeepsFrench is the whole point of
+// the setting: English out of the box, French one choice away, nothing lost.
+func TestInterfaceLanguageDefaultsToEnglishAndKeepsFrench(t *testing.T) {
+	t.Cleanup(func() { i18n.SetLocale(i18n.DefaultLocale) })
+
+	if got := Default().Language; got != i18n.English {
+		t.Errorf("Default().Language = %q, want %q", got, i18n.English)
+	}
+
+	dir := t.TempDir()
+	t.Setenv("TULIPE_CONFIG", filepath.Join(dir, "config.json"))
+	cfg := Default()
+	cfg.Language = i18n.French
+	if err := cfg.Save(); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if back.Language != i18n.French {
+		t.Fatalf("the saved interface language came back as %q", back.Language)
+	}
+
+	i18n.SetLocale(back.Language)
+	if err := back.Validate(); err != nil {
+		t.Fatalf("a French configuration must stay valid: %v", err)
+	}
+	if got := (Config{Provider: "inconnu"}).Validate(); got == nil ||
+		!strings.Contains(got.Error(), "fournisseur inconnu") {
+		t.Errorf("with French chosen, errors must come out in French: %v", got)
+	}
+}
+
+// TestInterfaceLanguageIsNotTheTargetLanguage guards the separation the two
+// settings are built on: reading the menus in one language and translating
+// into another has to work, and neither may drag the other along.
+func TestInterfaceLanguageIsNotTheTargetLanguage(t *testing.T) {
+	cfg := Default()
+	cfg.Language = i18n.French
+	cfg.TargetLanguage, cfg.TargetCode = "日本語", "ja"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("a French interface translating into Japanese must be valid: %v", err)
+	}
+	if cfg.Recipe().TargetLanguage != "日本語" {
+		t.Error("the recipe must carry the target language, not the interface one")
+	}
+
+	// The interface language must stay out of the cache key: changing it does
+	// not change one word of the translation, and throwing the cache away
+	// would make the user pay for the book again.
+	other := cfg
+	other.Language = i18n.English
+	if cfg.Recipe() != other.Recipe() {
+		t.Error("changing the interface language changed the resume-cache recipe")
+	}
+}
+
+// TestAnUnknownInterfaceLanguageFallsBack keeps a hand-edited configuration
+// file from leaving the program with no strings at all.
+func TestAnUnknownInterfaceLanguageFallsBack(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	t.Setenv("TULIPE_CONFIG", path)
+	if err := os.WriteFile(path, []byte(`{"language":"klingon"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Language != i18n.DefaultLocale {
+		t.Errorf("Language = %q, want a fallback to %q", cfg.Language, i18n.DefaultLocale)
 	}
 }

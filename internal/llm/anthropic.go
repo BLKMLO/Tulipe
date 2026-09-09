@@ -3,12 +3,13 @@ package llm
 import (
 	"context"
 	"errors"
-	"fmt"
 	"strings"
 	"sync/atomic"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
 )
 
 // DefaultAnthropicModel is the model used unless the configuration names
@@ -209,7 +210,7 @@ func (p *Anthropic) ListModels(ctx context.Context) ([]string, error) {
 		}
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("l'API n'a listé aucun modèle")
+		return nil, errors.New(i18n.T("llm.err.no-models-from-api"))
 	}
 	return out, nil
 }

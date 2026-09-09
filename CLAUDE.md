@@ -6,7 +6,7 @@ Repères pour travailler dans ce dépôt.
 
 Un binaire Go unique qui traduit des livres EPUB avec un modèle d'IA
 configurable, un document à la fois. Interface : un menu TUI (Bubble Tea) et un
-mode non interactif à drapeaux. **Il n'y a pas, et il ne doit pas y avoir,
+mode non interactif à drapeaux, en anglais par défaut et en français au choix. **Il n'y a pas, et il ne doit pas y avoir,
 d'interface web, de serveur HTTP local, ni d'assets embarqués.**
 
 Sortie en EPUB par défaut, texte brut en option (`--format txt`).
@@ -43,6 +43,8 @@ cmd/tulipe        drapeaux, aiguillage TUI / sans interface
         └── internal/translate   pipeline livre → document → lot → requête
               ├── internal/epub  lecture, découpage, réinjection, écriture
               └── internal/llm   fournisseurs (Anthropic, compatible OpenAI)
+
+internal/i18n     catalogue des messages ; importé par tous, n'importe personne
 ```
 
 `epub` et `llm` ne connaissent ni `translate` ni `ui`. `translate` ne connaît pas
@@ -53,6 +55,9 @@ réseau.
 
 `internal/llm/presets.go` décrit chaque service joignable : identifiant, nom,
 protocole (`Kind`), URL de base, variables d'environnement où chercher la clé.
+Le champ `Note` porte une **clé i18n**, pas une phrase ; `Name` porte un nom
+propre, sauf l'entrée générique qui porte elle aussi une clé. `DisplayName` et
+`NoteText` résolvent les deux — un nom qui n'est pas une clé traverse intact.
 `config.Provider` stocke un identifiant de preset ; `Preset.Kind` choisit le
 client. Les anciennes valeurs `anthropic` et `openai-compatible` restent des
 identifiants valides, ce qui garde les fichiers de configuration existants
@@ -276,7 +281,8 @@ HTTP arrive, exploitable ou non — les jetons sont dépensés dans les deux cas
 
 `translate.Recipe` liste **tout ce qui change le résultat** : fournisseur,
 modèle, effort, langues (noms et codes), glossaire, consignes de style,
-phrase de contexte. C'est ce qui donne la
+phrase de contexte. La langue de l'interface n'y est pas, et ne doit pas y
+entrer : elle ne change pas un mot de ce que le modèle renvoie. C'est ce qui donne la
 clé du cache. Ajouter un réglage qui influence la traduction sans l'ajouter à
 `Recipe` fait resservir en silence une traduction obtenue sous d'autres
 réglages — un utilisateur qui corrige son glossaire récupérerait l'ancienne
@@ -292,6 +298,12 @@ Pour le lire tel qu'il part au modèle, sans dépenser un jeton :
 
 ```bash
 TULIPE_PROMPT=1 go test ./internal/translate/ -run TestDumpPrompt -v
+```
+
+Sur le même modèle, pour relire les écrans tels que le README les montre :
+
+```bash
+TULIPE_SCREENS=1 go test ./internal/ui/ -run TestDumpScreens -v
 ```
 
 Deux choses à ne pas défaire dans `prompt.go` :
@@ -350,10 +362,49 @@ décompressée. C'est une variable et non une constante pour que le test puisse
 
 ## Langue des chaînes
 
-Le code, les commentaires et les identifiants sont en anglais. **Tout ce que
-l'utilisateur lit — libellés d'interface, messages d'erreur, notes — est en
-français**, y compris les erreurs renvoyées par `internal/epub`,
-`internal/llm` et `internal/translate`, qui remontent telles quelles à l'écran.
+Le code, les commentaires et les identifiants sont en anglais.
+
+**Tout ce que l'utilisateur lit — libellés d'interface, messages d'erreur,
+notes — passe par `internal/i18n`.** Pas de phrase écrite en dur dans le code,
+y compris dans les erreurs de `internal/epub`, `internal/llm` et
+`internal/translate` : elles remontent telles quelles à l'écran, donc elles
+doivent parler la langue de l'utilisateur.
+
+`i18n.T("clé", args...)` rend le message de la langue courante ; sans argument
+il rend le gabarit tel quel, ce qui permet de le passer à `fmt.Errorf` avec son
+`%w`. Une clé absente de la langue courante retombe sur l'anglais, et une clé
+absente de l'anglais est rendue telle quelle — c'est ce qui laisse
+`Preset.DisplayName` passer « Anthropic (Claude) » sans y toucher.
+
+**L'anglais (`en.go`) est la référence ; le français (`fr.go`) est complet et
+doit le rester.** `TestEveryLocaleCoversTheSameKeys` refuse une clé manquante
+d'un côté ou de l'autre, et `TestEveryTranslationKeepsTheSamePlaceholders`
+refuse une traduction qui aurait perdu ou réordonné un `%s` — un
+`%!d(MISSING)` au milieu d'un livre est le genre de panne qu'on ne voit qu'en
+production.
+
+Trois pièges qui reviennent :
+
+- **Un `errors.New` au niveau paquet fige sa langue au démarrage.** Les
+  sentinelles (`llm.ErrTruncated`, `translate.ErrServiceUnusable`) sont donc
+  des `messageError{clé}` dont le `Error()` consulte le catalogue au moment
+  où il est lu. Elles restent comparables, donc `errors.Is` fonctionne.
+- **Une colonne alignée se rembourre après traduction, jamais dans la
+  chaîne.** « source language » et « langue source » n'ont pas la même
+  longueur ; `ui.lbl(clé, largeur)` et `configLabel` existent pour ça.
+- **`go vet` refuse un gabarit non constant** passé à une fonction qu'il juge
+  printf. C'est pourquoi `translator.note` et `keep` prennent un message déjà
+  formé : l'appelant écrit `i18n.T(clé, args...)`.
+
+La langue d'interface vit dans `Config.Language`, choisie dans les réglages ou
+par `--lang`. **Elle est étrangère à la langue de traduction des livres**
+(`TargetLanguage`) : lire des menus en français en traduisant vers le japonais
+est un cas normal. Elle n'entre donc pas dans `Recipe` — la changer ne change
+pas un mot de la traduction, et jeter le cache ferait repayer le livre.
+
+`config.Default()` cale la langue cible d'une première installation sur la
+langue d'interface par défaut (anglais). C'est un défaut de premier lancement,
+rien de plus : les deux réglages sont indépendants ensuite.
 
 Exception : les prompts envoyés au modèle sont en anglais (`prompt.go`), ce qui
 donne de meilleurs résultats de suivi d'instructions ; la langue cible y est

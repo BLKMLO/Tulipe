@@ -18,24 +18,24 @@ changed.
 ---
 
 ```
-🌷 Tulipe  ·  traduction en cours
+🌷 Tulipe  ·  translation under way
 
 ███████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  40%  2/5 documents
 
-  ✓ I. Le retour au pays      47/47 segments en 52s
-  ✓ II. La lettre             61/62 segments en 1m11s  ⚑ 1
+  ✓ I. Le retour au pays      47/47 segments in 52s
+  ✓ II. La lettre             61/62 segments in 1m11s  ⚑ 1
   ⣾ III. Sous les tilleuls    23/58 segments
   · IV. L'hiver
   · V. Le départ
 
-│  écoulé  3m34s
-│  jetons  48 210 entrants · 19 844 sortants
+│  elapsed 3m34s
+│  tokens  48 210 in · 19 844 out
 
-échap annuler (le travail déjà fait est conservé)
+esc cancel (work already done is kept)
 ```
 
-*Tulipe's interface currently speaks French only — the screenshots in this
-document are real program output. An English UI may follow.*
+*The interface speaks English by default and French on request — one setting,
+independent of the language your books are translated into.*
 
 ## Why Tulipe
 
@@ -99,30 +99,50 @@ export GROQ_API_KEY=your_key
 tulipe
 ```
 
-A menu opens. "Réglages" (Settings) lets you pick the service, language and
-model — the `m` key asks the service for its list of models. "Tester la
-connexion" (Test the connection) checks that everything responds. Then
-"Traduire un EPUB" (Translate an EPUB).
+A menu opens. **Settings** lets you pick the service, the language and the
+model — the `m` key asks the service for its list of models. **Test the
+connection** checks that everything responds. Then **Translate an EPUB**.
 
 ```
-🌷 Tulipe  ·  traduction d'EPUB, chapitre par chapitre
+🌷 Tulipe  ·  EPUB translation, one chapter at a time
 
-› Traduire un EPUB          choisir un fichier et lancer la traduction
-  Reprendre une traduction  réutiliser les chapitres déjà traduits
-  Réglages                  modèle, langue, découpage, glossaire
-  Tester la connexion       une requête minuscule pour vérifier le modèle
-  Quitter
+› Translate an EPUB       pick a file and start the translation
+  Resume a translation    reuse the chapters already translated
+  Settings                model, language, chunking, glossary
+  Test the connection     one tiny request to check the model
+  Quit
 
-│  modèle  claude-opus-5 via anthropic
-│  langue  français
-│  clé API définie (ANTHROPIC_API_KEY)
+│  model    claude-opus-5 via anthropic
+│  language english
+│  API key  set (ANTHROPIC_API_KEY)
 
-↑/↓ naviguer  •  entrée choisir  •  q quitter
+↑/↓ move  •  enter choose  •  q quit
 ```
 
 **3. Get your book back.** It shows up next to the original, with the
 language in its name: `my-book.fr.epub`. The original is never modified, and
 an existing file is never overwritten.
+
+## Interface language
+
+Tulipe's menus, messages and errors are in **English by default**, and in
+**French** if you'd rather. It is the first entry in the settings screen:
+
+```
+› Interface language      ‹ English ›
+  Service                 ‹ anthropic ›
+  Model                   claude-opus-5
+```
+
+Press `←`/`→` to switch, then `s` to save. On the command line, `--lang fr`
+does the same for one run, and the choice is stored as `"language"` in the
+configuration file.
+
+This has nothing to do with the language your books are translated into.
+Reading a French interface while translating into Japanese is a perfectly
+ordinary thing to want, and changing one never touches the other — nor does
+it discard the resume cache, since the interface language changes not a word
+of the translation.
 
 ## Command line
 
@@ -201,14 +221,15 @@ something dubious, and flags the passage.
 At the end of the run, it offers to retry them:
 
 ```
-✗ 3 passage(s) laissés en langue source
+⚑ 3 passage(s) reported — the source text was kept wherever the translation
+                          was unusable
 
-p reprendre les passages non traduits  •  entrée retour au menu
+p retry the untranslated passages  •  enter back to the menu
 ```
 
 Only those passages go back to the model — three paragraphs cost three
 paragraphs, not three chapters. The offer reappears when you reopen the book,
-and in the "Reprendre une traduction" (Resume a translation) list.
+and in the **Resume a translation** list.
 
 From the command line:
 
@@ -226,8 +247,7 @@ tulipe translate --about "a 1950s New York noir novel" \
                  --to French --code fr my-book.epub
 ```
 
-In the interface, this is the **Contexte du livre** (Book context) field in
-the settings. Left empty, nothing is added to the prompt.
+In the interface, this is the **Book context** field in the settings. Left empty, nothing is added to the prompt.
 
 This sentence is presented to the model as context, never as an instruction:
 it cannot override the rules that protect your file.
@@ -327,8 +347,8 @@ flagged, rather than converted at the risk of breaking it.
 
 Translated chapters are kept in your system's cache folder
 (`~/.cache/tulipe/` on Linux). Re-running the same book picks up where it
-left off; the "Reprendre une traduction" (Resume a translation) menu entry
-lists pending jobs, and `--no-resume` ignores the cache.
+left off; the **Resume a translation** menu entry lists pending jobs, and
+`--no-resume` ignores the cache.
 
 Changing the model, language, glossary, context or style notes starts a
 fresh translation: the cache accounts for everything that changes the
@@ -337,6 +357,7 @@ outcome. Adjusting the batch size, though, doesn't discard it.
 ### Options for `translate`
 
 ```
+--lang           interface language: en or fr
 --to             target language, written the way a human would write it
 --code           BCP 47 tag written into the book (fr, es, pt-BR…)
 --from           source language (empty: auto-detected)

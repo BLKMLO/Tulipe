@@ -267,7 +267,7 @@ func TestParseRefusesAnOversizedArchive(t *testing.T) {
 	}
 
 	_, err = Parse(buf.Bytes())
-	if err == nil || !strings.Contains(err.Error(), "trop volumineuse") {
+	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("Parse = %v, want a refusal naming the size", err)
 	}
 }

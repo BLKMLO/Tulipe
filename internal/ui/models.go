@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/blkmlo/tulipe/internal/config"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -37,7 +38,7 @@ func fetchModels(cfg config.Config) tea.Cmd {
 		lister, ok := provider.(llm.ModelLister)
 		if !ok {
 			return modelsLoadedMsg{provider: cfg.Provider,
-				err: fmt.Errorf("%s ne sait pas lister ses modèles ; saisir le nom à la main", cfg.Provider)}
+				err: fmt.Errorf(i18n.T("ui.models.cannot"), cfg.Provider)}
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -81,7 +82,7 @@ func (m Model) updateModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.settings.cfg.Model = shown[m.modelsIndex]
 		m.settings.dirty = true
 		m.screen = screenSettings
-		m.notice, m.noticeOK = "Modèle choisi : "+m.settings.cfg.Model+" — « s » pour enregistrer.", true
+		m.notice, m.noticeOK = i18n.T("ui.models.chosen", m.settings.cfg.Model), true
 		return m, nil
 	default:
 		if msg.Type == tea.KeyRunes {
@@ -109,23 +110,23 @@ func (m Model) shownModels() []string {
 
 func (m Model) viewModels() string {
 	var b strings.Builder
-	b.WriteString(header("modèles proposés par le service") + "\n\n")
+	b.WriteString(header(i18n.T("ui.models.title")) + "\n\n")
 
 	if m.loading {
-		b.WriteString(m.spin.View() + dimStyle.Render(" interrogation du service…"))
-		b.WriteString("\n\n" + help("échap", "retour"))
+		b.WriteString(m.spin.View() + dimStyle.Render(i18n.T("ui.models.querying")))
+		b.WriteString("\n\n" + help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 		return b.String()
 	}
 	if len(m.models) == 0 {
-		b.WriteString(dimStyle.Render("Aucun modèle listé.\n\nCertains services n'exposent pas cette liste :\nsaisissez alors le nom du modèle à la main dans les réglages."))
-		b.WriteString("\n\n" + help("échap", "retour"))
+		b.WriteString(dimStyle.Render(i18n.T("ui.models.empty")))
+		b.WriteString("\n\n" + help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 		return b.String()
 	}
 
 	shown := m.shownModels()
-	b.WriteString(dimStyle.Render(fmt.Sprintf("%d modèle(s) annoncés par %s", len(m.models), m.settings.cfg.Provider)))
+	b.WriteString(dimStyle.Render(i18n.T("ui.models.count", len(m.models), m.settings.cfg.Provider)))
 	if m.modelsFilter != "" {
-		b.WriteString(accentStyle.Render("   filtre : " + m.modelsFilter))
+		b.WriteString(accentStyle.Render(i18n.T("ui.models.filter", m.modelsFilter)))
 	}
 	b.WriteString("\n\n")
 
@@ -137,12 +138,12 @@ func (m Model) viewModels() string {
 		b.WriteString(selectLine(i == cursor, shown[i], "") + "\n")
 	}
 	if len(shown) > end {
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  … et %d autres\n", len(shown)-end)))
+		b.WriteString(dimStyle.Render(i18n.T("ui.book.and-more", len(shown)-end)))
 	}
 	if len(shown) == 0 {
-		b.WriteString(dimStyle.Render("  aucun modèle ne correspond au filtre\n"))
+		b.WriteString(dimStyle.Render(i18n.T("ui.models.no-match")))
 	}
 
-	b.WriteString("\n" + help("↑/↓", "choisir", "entrée", "retenir", "taper", "filtrer", "échap", "retour"))
+	b.WriteString("\n" + help(i18n.T("ui.key.up-down"), i18n.T("ui.act.choose"), i18n.T("ui.key.enter"), i18n.T("ui.act.keep"), i18n.T("ui.key.type"), i18n.T("ui.act.filter"), i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 	return b.String()
 }

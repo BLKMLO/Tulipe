@@ -3,6 +3,8 @@ package llm
 import (
 	"sort"
 	"strings"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
 )
 
 // Kind is the protocol a backend speaks. Several services share one kind, which
@@ -23,7 +25,9 @@ const (
 type Preset struct {
 	// ID is what the configuration stores.
 	ID string
-	// Name is what the interface shows.
+	// Name is what the interface shows. Service names are proper nouns and
+	// stay as they are; the one entry that names no particular service holds
+	// an i18n key instead, which DisplayName resolves.
 	Name string
 	// Kind is the protocol, one of the Kind constants.
 	Kind string
@@ -38,10 +42,24 @@ type Preset struct {
 	// FreeTier marks a service that advertises a tier reachable without a
 	// payment card. What that tier allows is for its own site to say.
 	FreeTier bool
-	// Note is a short line shown next to the entry.
+	// Note is an i18n key for the short line shown next to the entry. It is a
+	// key rather than a sentence so that the catalogue carries no language of
+	// its own.
 	Note string
 	// Docs is where the user goes to get a key or check the terms.
 	Docs string
+}
+
+// DisplayName is the name to print, in the interface language. A name that is
+// not a known key — every real service — comes back untouched.
+func (p Preset) DisplayName() string { return i18n.T(p.Name) }
+
+// NoteText is the note to print, in the interface language.
+func (p Preset) NoteText() string {
+	if p.Note == "" {
+		return ""
+	}
+	return i18n.T(p.Note)
 }
 
 // NeedsBaseURL reports whether the user still has to complete the endpoint.
@@ -56,7 +74,7 @@ var presets = []Preset{
 	{
 		ID: KindAnthropic, Name: "Anthropic (Claude)", Kind: KindAnthropic,
 		KeyEnv: []string{"ANTHROPIC_API_KEY"},
-		Note:   "SDK officiel, réglage d'effort disponible",
+		Note:   "preset.note.anthropic",
 		Docs:   "https://platform.claude.com/",
 	},
 	{
@@ -64,7 +82,7 @@ var presets = []Preset{
 		BaseURL:  "https://generativelanguage.googleapis.com/v1beta/openai/",
 		KeyEnv:   []string{"GEMINI_API_KEY", "GOOGLE_API_KEY"},
 		FreeTier: true,
-		Note:     "couche compatible OpenAI de Gemini",
+		Note:     "preset.note.gemini",
 		Docs:     "https://aistudio.google.com/apikey",
 	},
 	{
@@ -79,7 +97,7 @@ var presets = []Preset{
 		BaseURL:  "https://api.groq.com/openai/v1",
 		KeyEnv:   []string{"GROQ_API_KEY"},
 		FreeTier: true,
-		Note:     "inférence rapide",
+		Note:     "preset.note.groq",
 		Docs:     "https://console.groq.com/keys",
 	},
 	{
@@ -87,7 +105,7 @@ var presets = []Preset{
 		BaseURL:  "https://api.cerebras.ai/v1",
 		KeyEnv:   []string{"CEREBRAS_API_KEY"},
 		FreeTier: true,
-		Note:     "fenêtre de contexte réduite : baisser --chunk",
+		Note:     "preset.note.cerebras",
 		Docs:     "https://cloud.cerebras.ai/",
 	},
 	{
@@ -102,22 +120,22 @@ var presets = []Preset{
 		BaseURL:  "https://api.cohere.ai/compatibility/v1",
 		KeyEnv:   []string{"COHERE_API_KEY"},
 		FreeTier: true,
-		Note:     "couche compatible OpenAI de Cohere",
+		Note:     "preset.note.cohere",
 		Docs:     "https://dashboard.cohere.com/api-keys",
 	},
 	{
 		ID: "cloudflare", Name: "Cloudflare Workers AI", Kind: KindOpenAI,
-		BaseURL:  "https://api.cloudflare.com/client/v4/accounts/{identifiant_de_compte}/ai/v1",
+		BaseURL:  "https://api.cloudflare.com/client/v4/accounts/{account_id}/ai/v1",
 		KeyEnv:   []string{"CLOUDFLARE_API_TOKEN", "CLOUDFLARE_API_KEY"},
 		FreeTier: true,
-		Note:     "remplacer {identifiant_de_compte} dans l'URL",
+		Note:     "preset.note.cloudflare",
 		Docs:     "https://dash.cloudflare.com/",
 	},
 	{
 		ID: "deepl", Name: "DeepL", Kind: KindDeepL,
 		BaseURL: "https://api-free.deepl.com/v2",
 		KeyEnv:  []string{"DEEPL_API_KEY", "DEEPL_AUTH_KEY"},
-		Note:    "traducteur dédié : pas de glossaire libre ni de consignes de style",
+		Note:    "preset.note.deepl",
 		Docs:    "https://www.deepl.com/pro-api",
 	},
 	{
@@ -130,27 +148,27 @@ var presets = []Preset{
 		ID: "openrouter", Name: "OpenRouter", Kind: KindOpenAI,
 		BaseURL: "https://openrouter.ai/api/v1",
 		KeyEnv:  []string{"OPENROUTER_API_KEY"},
-		Note:    "passerelle vers de nombreux modèles",
+		Note:    "preset.note.openrouter",
 		Docs:    "https://openrouter.ai/keys",
 	},
 	{
 		ID: "ollama", Name: "Ollama (local)", Kind: KindOpenAI,
 		BaseURL: "http://localhost:11434/v1",
 		NoKey:   true,
-		Note:    "sur la machine : rien ne sort du poste",
+		Note:    "preset.note.local",
 		Docs:    "https://ollama.com/",
 	},
 	{
 		ID: "lmstudio", Name: "LM Studio (local)", Kind: KindOpenAI,
 		BaseURL: "http://localhost:1234/v1",
 		NoKey:   true,
-		Note:    "sur la machine : rien ne sort du poste",
+		Note:    "preset.note.local",
 		Docs:    "https://lmstudio.ai/",
 	},
 	{
-		ID: KindOpenAI, Name: "Autre service compatible OpenAI", Kind: KindOpenAI,
+		ID: KindOpenAI, Name: "preset.name.custom", Kind: KindOpenAI,
 		KeyEnv: []string{"OPENAI_API_KEY"},
-		Note:   "indiquer l'URL de base à la main",
+		Note:   "preset.note.custom",
 	},
 }
 

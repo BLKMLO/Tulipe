@@ -10,6 +10,7 @@ import (
 
 	"github.com/blkmlo/tulipe/internal/config"
 	"github.com/blkmlo/tulipe/internal/epub"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/blkmlo/tulipe/internal/translate"
 	tea "github.com/charmbracelet/bubbletea"
@@ -51,7 +52,7 @@ func newTestModel() Model {
 func TestMenuRendersAndNavigates(t *testing.T) {
 	m := newTestModel()
 	view := m.View()
-	for _, want := range []string{"Tulipe", "Traduire un EPUB", "Reprendre une traduction", "Réglages", "Quitter"} {
+	for _, want := range []string{"Tulipe", "Translate an EPUB", "Resume a translation", "Settings", "Quit"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the menu does not show %q", want)
 		}
@@ -72,7 +73,7 @@ func TestMenuRendersAndNavigates(t *testing.T) {
 
 func TestEnterOpensSettings(t *testing.T) {
 	m := newTestModel()
-	m = press(t, m, "down", "down", "enter")
+	m = press(t, m, "down", "down", "enter", "down")
 	if m.screen != screenSettings {
 		t.Fatalf("screen = %v, want the settings screen", m.screen)
 	}
@@ -83,7 +84,7 @@ func TestEnterOpensSettings(t *testing.T) {
 
 func TestSettingsCycleServiceAndRevealRelevantFields(t *testing.T) {
 	m := newTestModel()
-	m = press(t, m, "down", "down", "enter") // settings
+	m = press(t, m, "down", "down", "enter", "down") // settings, then past the interface language
 
 	// Effort only concerns the Anthropic backend.
 	if m.settings.cfg.Provider != config.ProviderAnthropic {
@@ -100,7 +101,7 @@ func TestSettingsCycleServiceAndRevealRelevantFields(t *testing.T) {
 	if strings.Contains(m.View(), "Effort") {
 		t.Error("Effort must be hidden for a service that does not have it")
 	}
-	if !strings.Contains(m.View(), "modifications non enregistrées") {
+	if !strings.Contains(m.View(), "unsaved changes") {
 		t.Error("an unsaved change must be signalled")
 	}
 	// Picking a service must bring its endpoint along, or the user has to
@@ -116,7 +117,7 @@ func TestSettingsCycleServiceAndRevealRelevantFields(t *testing.T) {
 
 func TestCyclingServicesNeverLandsOnAnInvalidOne(t *testing.T) {
 	m := newTestModel()
-	m = press(t, m, "down", "down", "enter")
+	m = press(t, m, "down", "down", "enter", "down")
 	seen := map[string]bool{}
 	for i := 0; i < len(llm.PresetIDs())+1; i++ {
 		id := m.settings.cfg.Provider
@@ -135,7 +136,7 @@ func TestAHandTypedEndpointSurvivesAServiceChange(t *testing.T) {
 	m := newTestModel()
 	m.settings.cfg.Provider = config.ProviderOpenAI
 	m.settings.cfg.BaseURL = "http://localhost:9999/v1"
-	m = press(t, m, "down", "down", "enter")
+	m = press(t, m, "down", "down", "enter", "down")
 	m.settings.cfg.Provider = config.ProviderOpenAI
 	m.settings.cfg.BaseURL = "http://localhost:9999/v1"
 	m = press(t, m, "right")
@@ -146,10 +147,10 @@ func TestAHandTypedEndpointSurvivesAServiceChange(t *testing.T) {
 
 func TestSettingsRejectInvalidNumber(t *testing.T) {
 	m := newTestModel()
-	m = press(t, m, "down", "down", "enter")
+	m = press(t, m, "down", "down", "enter", "down")
 
-	// Walk to "Caractères par requête".
-	for i := 0; i < 30 && m.settings.fields[m.settings.visible()[m.settings.index]].label != "Caractères par requête"; i++ {
+	// Walk to "Characters per request".
+	for i := 0; i < 30 && m.settings.fields[m.settings.visible()[m.settings.index]].label != "Characters per request"; i++ {
 		m = press(t, m, "down")
 	}
 	m = press(t, m, "enter") // start editing
@@ -168,7 +169,7 @@ func TestSettingsRejectInvalidNumber(t *testing.T) {
 
 func TestEscapeGuardsUnsavedSettings(t *testing.T) {
 	m := newTestModel()
-	m = press(t, m, "down", "down", "enter", "right")
+	m = press(t, m, "down", "down", "enter", "down", "right")
 	m = press(t, m, "esc")
 	if m.screen != screenSettings {
 		t.Error("the first escape must warn instead of discarding unsaved changes")
@@ -182,7 +183,7 @@ func TestEscapeGuardsUnsavedSettings(t *testing.T) {
 func TestOutputPathDerivation(t *testing.T) {
 	cfg := config.Default()
 	got := outputPath(cfg, filepath.Join("/livres", "1984.epub"))
-	want := filepath.Join("/livres", "1984.fr.epub")
+	want := filepath.Join("/livres", "1984.en.epub")
 	if got != want {
 		t.Errorf("outputPath = %q, want %q", got, want)
 	}
@@ -230,7 +231,7 @@ func TestResumeScreenExplainsAnEmptyCache(t *testing.T) {
 	m = press(t, m, "down", "enter")
 	updated, _ := m.Update(runsLoadedMsg{})
 	m = updated.(Model)
-	if !strings.Contains(m.View(), "Aucune traduction en cache") {
+	if !strings.Contains(m.View(), "No translation in the cache") {
 		t.Error("an empty resume list must explain itself")
 	}
 }
@@ -266,8 +267,8 @@ func TestSlugFoldsAccentsAndNeverReturnsEmpty(t *testing.T) {
 		"français":           "francais",
 		"português (Brasil)": "portugues-brasil",
 		"español":            "espanol",
-		"日本語":                "traduit",
-		"":                   "traduit",
+		"日本語":                "translated",
+		"":                   "translated",
 	}
 	for in, want := range cases {
 		if got := slug(in); got != want {
@@ -278,7 +279,7 @@ func TestSlugFoldsAccentsAndNeverReturnsEmpty(t *testing.T) {
 
 func TestModelPickerFiltersAndSelects(t *testing.T) {
 	m := newTestModel()
-	m = press(t, m, "down", "down", "enter") // settings
+	m = press(t, m, "down", "down", "enter", "down") // settings, then past the interface language
 	updated, _ := m.Update(modelsLoadedMsg{
 		provider: "groq",
 		models:   []string{"alpha-8b", "beta-70b", "gamma-8b"},
@@ -287,7 +288,7 @@ func TestModelPickerFiltersAndSelects(t *testing.T) {
 	m.screen = screenModels
 
 	view := m.View()
-	for _, want := range []string{"alpha-8b", "beta-70b", "3 modèle(s)"} {
+	for _, want := range []string{"alpha-8b", "beta-70b", "3 model(s)"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("the picker does not show %q", want)
 		}
@@ -314,18 +315,18 @@ func TestModelPickerExplainsAnEmptyList(t *testing.T) {
 	updated, _ := m.Update(modelsLoadedMsg{provider: "x"})
 	m = updated.(Model)
 	m.screen = screenModels
-	if !strings.Contains(m.View(), "Aucun modèle listé") {
+	if !strings.Contains(m.View(), "No model listed") {
 		t.Error("an empty list must explain itself")
 	}
 }
 
 func TestOutputPathFollowsTheFormat(t *testing.T) {
 	cfg := config.Default()
-	if got := outputPath(cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.fr.epub") {
+	if got := outputPath(cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.en.epub") {
 		t.Errorf("outputPath = %q", got)
 	}
 	cfg.Format = config.FormatText
-	if got := outputPath(cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.fr.txt") {
+	if got := outputPath(cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.en.txt") {
 		t.Errorf("outputPath in text mode = %q, want a .txt file", got)
 	}
 }
@@ -398,8 +399,8 @@ func TestReportOffersToRetryPendingPassages(t *testing.T) {
 	m.screen = screenReport
 
 	view := m.View()
-	if !strings.Contains(view, "reprendre les passages non traduits") {
-		t.Errorf("le rapport doit proposer la reprise :\n%s", view)
+	if !strings.Contains(view, "retry the untranslated passages") {
+		t.Errorf("the report must offer a retry:\n%s", view)
 	}
 
 	// Nothing pending, nothing failed: no offer.
@@ -408,8 +409,8 @@ func TestReportOffersToRetryPendingPassages(t *testing.T) {
 		{Title: "I", Status: translate.StatusDone, Translated: 42, TotalSegments: 42},
 	}}
 	clean.screen = screenReport
-	if strings.Contains(clean.View(), "reprendre les passages") {
-		t.Error("aucune reprise ne doit être proposée quand tout est traduit")
+	if strings.Contains(clean.View(), "retry the untranslated") {
+		t.Error("no retry must be offered when everything is translated")
 	}
 }
 
@@ -423,7 +424,7 @@ func TestRetryKeyAsksForAPartialRun(t *testing.T) {
 	m.screen = screenReport
 	m = press(t, m, "p")
 	if !m.retryOnly {
-		t.Error("« p » doit demander une reprise des seuls passages en attente")
+		t.Error("“p” must ask for a retry of the pending passages only")
 	}
 }
 
@@ -436,17 +437,17 @@ func TestBookScreenShowsPendingPassages(t *testing.T) {
 	m.screen = screenBook
 
 	view := m.View()
-	if !strings.Contains(view, "3 passage(s) laissés en langue source") {
-		t.Errorf("l'écran du livre doit signaler les passages en attente :\n%s", view)
+	if !strings.Contains(view, "3 passage(s) left in the source language") {
+		t.Errorf("the book screen must report the pending passages:\n%s", view)
 	}
-	if !strings.Contains(view, "reprendre les passages en attente") {
-		t.Error("la touche de reprise doit être proposée")
+	if !strings.Contains(view, "retry the pending passages") {
+		t.Error("the retry key must be offered")
 	}
 
 	// A book with nothing pending must not offer it.
 	m.pending = 0
-	if strings.Contains(m.View(), "reprendre les passages en attente") {
-		t.Error("aucune reprise ne doit être proposée sans passage en attente")
+	if strings.Contains(m.View(), "retry the pending passages") {
+		t.Error("no retry must be offered with nothing pending")
 	}
 }
 
@@ -457,9 +458,70 @@ func TestRetryKeyWithoutPendingExplainsItself(t *testing.T) {
 	m.screen = screenBook
 	m = press(t, m, "p")
 	if m.retryOnly {
-		t.Error("aucune reprise ne doit être lancée sans passage en attente")
+		t.Error("no retry must start with nothing pending")
 	}
-	if !strings.Contains(m.View(), "Aucun passage à reprendre") {
-		t.Errorf("l'appui doit être expliqué :\n%s", m.View())
+	if !strings.Contains(m.View(), "No passage to retry") {
+		t.Errorf("the key press must be explained:\n%s", m.View())
+	}
+}
+
+// TestSettingsSwitchTheInterfaceLanguage walks the change the way a user
+// would: open the settings, cycle the first field, save, and read the menu
+// back in the other language.
+func TestSettingsSwitchTheInterfaceLanguage(t *testing.T) {
+	t.Setenv("TULIPE_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	t.Cleanup(func() { i18n.SetLocale(i18n.DefaultLocale) })
+
+	m := newTestModel()
+	if !strings.Contains(m.View(), "Translate an EPUB") {
+		t.Fatal("the interface must start in English")
+	}
+
+	m = press(t, m, "down", "down", "enter") // settings, on the language field
+	if label := m.settings.fields[m.settings.visible()[m.settings.index]].label; label != "Interface language" {
+		t.Fatalf("the first setting is %q, want the interface language", label)
+	}
+	m = press(t, m, "right") // next language
+	if m.settings.cfg.Language != i18n.French {
+		t.Fatalf("cycling gave %q, want %q", m.settings.cfg.Language, i18n.French)
+	}
+	if strings.Contains(m.View(), "Langue de l'interface") {
+		t.Error("the language must not take effect before the settings are saved")
+	}
+
+	m = press(t, m, "s") // save
+	if m.cfg.Language != i18n.French {
+		t.Fatalf("saving kept %q", m.cfg.Language)
+	}
+	view := m.View()
+	if !strings.Contains(view, "Langue de l'interface") {
+		t.Errorf("the settings screen stayed in English after saving:\n%s", view)
+	}
+
+	m = press(t, m, "esc")
+	if menu := m.View(); !strings.Contains(menu, "Traduire un EPUB") {
+		t.Errorf("the menu stayed in English:\n%s", menu)
+	}
+}
+
+// TestTheInterfaceLanguageLeavesTheTargetLanguageAlone: the two settings sit
+// on the same screen and mean entirely different things.
+func TestTheInterfaceLanguageLeavesTheTargetLanguageAlone(t *testing.T) {
+	t.Setenv("TULIPE_CONFIG", filepath.Join(t.TempDir(), "config.json"))
+	t.Cleanup(func() { i18n.SetLocale(i18n.DefaultLocale) })
+
+	cfg := config.Default()
+	cfg.TargetLanguage, cfg.TargetCode = "日本語", "ja"
+	m := New(cfg, "")
+	sized, _ := m.Update(tea.WindowSizeMsg{Width: 100, Height: 40})
+	m = sized.(Model)
+
+	m = press(t, m, "down", "down", "enter", "right", "s")
+	if m.cfg.TargetLanguage != "日本語" || m.cfg.TargetCode != "ja" {
+		t.Errorf("changing the interface language moved the target to %q (%q)",
+			m.cfg.TargetLanguage, m.cfg.TargetCode)
+	}
+	if got := outputPath(m.cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.ja.epub") {
+		t.Errorf("outputPath = %q, want the file still named after the target language", got)
 	}
 }

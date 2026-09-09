@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/blkmlo/tulipe/internal/epub"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 )
 
@@ -69,10 +70,16 @@ type Options struct {
 	failures *failureCounter
 }
 
+// messageError is a sentinel whose wording is read when it is printed rather
+// than when the package is initialised, so it follows the interface language.
+type messageError struct{ key string }
+
+func (e messageError) Error() string { return i18n.T(e.key) }
+
 // ErrServiceUnusable means the translation backend failed often enough that
 // continuing would be pointless. The run stops instead of burning through the
 // rest of the book.
-var ErrServiceUnusable = errors.New("le service de traduction ne répond pas correctement")
+var ErrServiceUnusable error = messageError{"translate.err.service-unusable"}
 
 type failureCounter struct {
 	consecutive int
@@ -87,10 +94,15 @@ func (f *failureCounter) trip() bool {
 	return f.limit > 0 && f.consecutive >= f.limit
 }
 
+// defaultTargetLanguage is what an Options with no target at all falls back
+// to. It is the language of the default interface, not a preference of the
+// pipeline: callers that mean something else always say so.
+const defaultTargetLanguage = "english"
+
 // Defaults fills in every unset field with a usable value.
 func (o Options) Defaults() Options {
 	if o.TargetLanguage == "" {
-		o.TargetLanguage = "français"
+		o.TargetLanguage = defaultTargetLanguage
 	}
 	if o.ChunkChars <= 0 {
 		o.ChunkChars = 4000
@@ -143,7 +155,7 @@ type Note struct {
 }
 
 func (n Note) String() string {
-	return fmt.Sprintf("%s [segment %d] %s", n.Document, n.Segment, n.Message)
+	return i18n.T("translate.note.format", n.Document, n.Segment, n.Message)
 }
 
 // DocResult is the outcome of translating one document.
@@ -249,18 +261,21 @@ func (t *translator) emit(msg string, retry *llm.RetryNotice) {
 	})
 }
 
-func (t *translator) note(idx int, format string, args ...any) {
+// note records a message already written in the interface language: callers
+// pass i18n.T(key, ...), not a format string, so that nothing here has to know
+// which language the sentence came out in.
+func (t *translator) note(idx int, msg string) {
 	t.res.Notes = append(t.res.Notes, Note{
 		Document: t.name,
 		Segment:  t.segmentNumber(idx),
-		Message:  fmt.Sprintf(format, args...),
+		Message:  msg,
 	})
 }
 
 // keep records a segment that stayed in the source language: it is both worth
 // telling the user about and worth offering to retry later.
-func (t *translator) keep(idx int, format string, args ...any) {
-	t.note(idx, format, args...)
+func (t *translator) keep(idx int, msg string) {
+	t.note(idx, msg)
 	t.res.Pending = append(t.res.Pending, t.segmentNumber(idx))
 }
 
@@ -327,13 +342,13 @@ func (t *translator) translateRange(lo, hi int, out []string) {
 		return
 	}
 	if hi-lo == 1 {
-		t.keep(lo, "laissé en langue source : %v", err)
+		t.keep(lo, i18n.T("translate.note.kept-source", err))
 		t.done++
 		t.emit("", nil)
 		return
 	}
 	mid := lo + (hi-lo)/2
-	t.emit(fmt.Sprintf("lot de %d segments redécoupé après : %v", hi-lo, err), nil)
+	t.emit(i18n.T("translate.msg.batch-split", hi-lo, err), nil)
 	t.translateRange(lo, mid, out)
 	t.translateRange(mid, hi, out)
 }
@@ -353,26 +368,26 @@ func (t *translator) accept(lo, hi int, got []string, out []string) {
 
 		switch {
 		case strings.TrimSpace(tr) == "":
-			t.keep(i, "traduction vide renvoyée par le modèle ; source conservée")
+			t.keep(i, i18n.T("translate.note.empty-translation"))
 		case !epub.SafeForXML(tr):
-			// UTF-8 invalide, ou caractères de contrôle : le livre produit
-			// serait illisible par les liseuses.
-			t.keep(i, "traduction contenant des caractères qu'un EPUB ne peut porter ; source conservée")
+			// Invalid UTF-8, or control characters: the book produced would
+			// not open in any reader.
+			t.keep(i, i18n.T("translate.note.unsafe-characters"))
 		case seg.Kind == epub.KindBlock && epub.WellFormed(seg.Source) == nil && epub.WellFormed(tr) != nil:
-			t.keep(i, "balisage mal formé dans la traduction ; source conservée")
+			t.keep(i, i18n.T("translate.note.broken-markup"))
 		case seg.Kind == epub.KindText && !strings.ContainsAny(seg.Source, "<>") && strings.ContainsAny(tr, "<>"):
 			// A plain-text span gets escaped on the way back in, so markup the
 			// model invented would show up as literal angle brackets to the
 			// reader. Keep the source instead.
-			t.keep(i, "du balisage a été introduit dans du texte brut ; source conservée")
+			t.keep(i, i18n.T("translate.note.markup-in-text"))
 		case len(tr) > 6*len(seg.Source)+200:
-			t.keep(i, "traduction %d fois plus longue que la source ; source conservée", len(tr)/max(1, len(seg.Source)))
+			t.keep(i, i18n.T("translate.note.too-long", len(tr)/max(1, len(seg.Source))))
 		default:
 			out[i] = tr
 			t.res.Translated++
 			if seg.Kind == epub.KindBlock {
 				if a, b := epub.Tags(seg.Source), epub.Tags(tr); !sameTags(a, b) {
-					t.note(i, "balisage modifié : source %v, traduction %v", a, b)
+					t.note(i, i18n.T("translate.note.markup-changed", a, b))
 				}
 			}
 			plain.WriteString(stripTags(tr))
@@ -440,7 +455,7 @@ func (t *translator) requestDirect(direct llm.DirectTranslator, lo, hi int, sour
 		if len(resp.Translations) != len(sources) {
 			// The service answered, so this is not an outage; record it and
 			// stop retrying, the caller will split.
-			answerErr = fmt.Errorf("%d traductions renvoyées pour %d segments",
+			answerErr = fmt.Errorf(i18n.T("translate.err.count"),
 				len(resp.Translations), len(sources))
 			return nil
 		}
@@ -486,7 +501,7 @@ func (t *translator) requestPrompt(sources []string, splittable bool) ([]string,
 		}
 		parsed, err := parseTranslations(resp.Text)
 		if err == nil && len(parsed) != len(sources) {
-			err = fmt.Errorf("%d traductions renvoyées pour %d segments", len(parsed), len(sources))
+			err = fmt.Errorf(i18n.T("translate.err.count"), len(parsed), len(sources))
 		}
 		if err == nil {
 			t.res.Requests++
@@ -496,7 +511,7 @@ func (t *translator) requestPrompt(sources []string, splittable bool) ([]string,
 		}
 		lastErr = err
 		if attempt < answerAttempts {
-			t.emit(fmt.Sprintf("réponse inexploitable, nouvel essai : %v", err), nil)
+			t.emit(i18n.T("translate.msg.unusable-answer", err), nil)
 		}
 	}
 	if splittable {
@@ -545,7 +560,7 @@ func (t *translator) timeoutError(err error) error {
 	if t.ctx.Err() != nil || !errors.Is(err, context.DeadlineExceeded) {
 		return err
 	}
-	return fmt.Errorf("le service n'a pas répondu en %s", t.opts.RequestTimeout)
+	return fmt.Errorf(i18n.T("translate.err.no-answer-in"), t.opts.RequestTimeout)
 }
 
 // guard turns a request failure into an abort when the backend looks hopeless,
@@ -558,7 +573,7 @@ func (t *translator) guard(err error) error {
 	case llm.Fatal(err):
 		t.abortErr = fmt.Errorf("%w : %w", ErrServiceUnusable, err)
 	case t.opts.failures.trip():
-		t.abortErr = fmt.Errorf("%w : %d échecs consécutifs, dernier : %w",
+		t.abortErr = fmt.Errorf(i18n.T("translate.err.consecutive"),
 			ErrServiceUnusable, t.opts.failures.consecutive, err)
 	default:
 		return err

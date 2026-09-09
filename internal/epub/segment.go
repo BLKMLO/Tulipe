@@ -11,6 +11,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
 )
 
 // Kind tells how a segment must be handled once translated.
@@ -57,7 +59,7 @@ var skipElements = map[string]bool{
 type UnsupportedEncodingError struct{ Encoding string }
 
 func (e *UnsupportedEncodingError) Error() string {
-	return fmt.Sprintf("document encodé en %s ; Tulipe ne sait lire que l'UTF-8", e.Encoding)
+	return i18n.T("epub.err.unsupported-encoding", e.Encoding)
 }
 
 // declaredEncoding reads the encoding pseudo-attribute of the XML declaration.
@@ -114,7 +116,7 @@ func Extract(doc []byte) ([]Segment, error) {
 			break
 		}
 		if err != nil {
-			return nil, fmt.Errorf("octet %d : %w", before, err)
+			return nil, fmt.Errorf(i18n.T("epub.err.at-byte"), before, err)
 		}
 		after := int(d.InputOffset())
 		// A tolerant decoder invents end tags for a malformed document, and
@@ -169,7 +171,7 @@ func Extract(doc []byte) ([]Segment, error) {
 		}
 	}
 	if inSeg {
-		return nil, fmt.Errorf("élément <%s> non refermé", segElem)
+		return nil, fmt.Errorf(i18n.T("epub.err.unclosed-element"), segElem)
 	}
 	return segs, nil
 }
@@ -254,7 +256,7 @@ func hasLetter(s string) bool {
 // unchanged.
 func Apply(doc []byte, segs []Segment, translations []string) ([]byte, error) {
 	if len(segs) != len(translations) {
-		return nil, fmt.Errorf("%d traductions reçues pour %d segments", len(translations), len(segs))
+		return nil, fmt.Errorf(i18n.T("epub.err.translation-count"), len(translations), len(segs))
 	}
 	ordered := make([]int, len(segs))
 	for i := range ordered {
@@ -268,7 +270,7 @@ func Apply(doc []byte, segs []Segment, translations []string) ([]byte, error) {
 	for _, i := range ordered {
 		s := segs[i]
 		if s.Start < prev {
-			return nil, fmt.Errorf("segments qui se chevauchent à l'octet %d", s.Start)
+			return nil, fmt.Errorf(i18n.T("epub.err.overlapping-segments"), s.Start)
 		}
 		out.Write(doc[prev:s.Start])
 		tr := translations[i]
@@ -301,7 +303,7 @@ func Apply(doc []byte, segs []Segment, translations []string) ([]byte, error) {
 	// refused here rather than written to disk.
 	result := out.Bytes()
 	if _, err := Extract(result); err != nil {
-		return nil, fmt.Errorf("le document ne serait plus lisible après réinjection : %w", err)
+		return nil, fmt.Errorf(i18n.T("epub.err.unreadable-after-splice"), err)
 	}
 	return result, nil
 }

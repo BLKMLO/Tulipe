@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/blkmlo/tulipe/internal/epub"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 )
 
@@ -127,10 +128,10 @@ type BookOptions struct {
 // not written: the caller decides where the result goes.
 func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions, onProgress func(Progress)) (*Result, error) {
 	if book == nil {
-		return nil, errors.New("aucun livre à traduire")
+		return nil, errors.New(i18n.T("translate.err.no-book"))
 	}
 	if p == nil {
-		return nil, errors.New("aucun service de traduction configuré")
+		return nil, errors.New(i18n.T("translate.err.no-provider"))
 	}
 	opts.Options = opts.Options.Defaults()
 	started := time.Now()
@@ -150,14 +151,14 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		names = append(names, name)
 	}
 	if len(names) == 0 {
-		return nil, errors.New("aucun document sélectionné pour la traduction")
+		return nil, errors.New(i18n.T("translate.err.no-document"))
 	}
 
 	res := &Result{Book: book}
 	for _, name := range names {
 		title := titles[name]
 		if title == "" {
-			title = "Navigation"
+			title = i18n.T("translate.doc.navigation")
 		}
 		res.Documents = append(res.Documents, DocState{Name: name, Title: title, Status: StatusPending})
 	}
@@ -190,7 +191,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		doc, ok := book.Read(name)
 		if !ok {
 			res.Documents[i].Status = StatusFailed
-			res.Documents[i].Err = fmt.Errorf("document absent de l'archive")
+			res.Documents[i].Err = errors.New(i18n.T("translate.err.document-absent"))
 			report(i, "", nil)
 			continue
 		}
@@ -204,7 +205,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 					book.Replace(name, cached)
 					res.Documents[i].Status = StatusCached
 					res.Documents[i].Pending = len(pending)
-					report(i, "déjà traduit, repris du cache", nil)
+					report(i, i18n.T("translate.msg.from-cache"), nil)
 					continue
 				}
 
@@ -212,7 +213,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 				// sent again; the rest of the chapter is already paid for.
 				res.Documents[i].Status = StatusRunning
 				res.Documents[i].TotalSegments = len(pending)
-				report(i, fmt.Sprintf("reprise de %d passage(s)", len(pending)), nil)
+				report(i, i18n.T("translate.msg.retrying-pending", len(pending)), nil)
 
 				docStart := time.Now()
 				liveUsage, liveRequests, liveAttempted = llm.Usage{}, 0, 0
@@ -238,7 +239,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 					book.Replace(name, cached)
 					res.Documents[i].Status = StatusCached
 					res.Documents[i].Pending = len(pending)
-					res.Notes = append(res.Notes, Note{Document: name, Message: "reprise impossible : " + err.Error()})
+					res.Notes = append(res.Notes, Note{Document: name, Message: i18n.T("translate.note.retry-failed", err)})
 					report(i, "", nil)
 					if ctx.Err() != nil {
 						return res, ctx.Err()
@@ -259,7 +260,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 				res.Documents[i].Pending = len(out.Pending)
 				storePending(opts.Cache, name, out.Pending)
 				if err := opts.Cache.Put(name, final); err != nil {
-					res.Notes = append(res.Notes, Note{Document: name, Message: "n'a pas pu être mis en cache : " + err.Error()})
+					res.Notes = append(res.Notes, Note{Document: name, Message: i18n.T("translate.note.not-cached", err)})
 				}
 				report(i, "", nil)
 				continue
@@ -311,7 +312,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 		// reporting a tick would hand the reader an untranslated book.
 		if out.Segments > 0 && out.Translated == 0 {
 			res.Documents[i].Status = StatusFailed
-			res.Documents[i].Err = fmt.Errorf("aucun des %d segments n'a pu être traduit", out.Segments)
+			res.Documents[i].Err = fmt.Errorf(i18n.T("translate.err.none-translated"), out.Segments)
 			report(i, "", nil)
 			continue
 		}
@@ -328,14 +329,14 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 			final, _ := book.Read(name)
 			storePending(opts.Cache, name, out.Pending)
 			if err := opts.Cache.Put(name, final); err != nil {
-				res.Notes = append(res.Notes, Note{Document: name, Message: "n'a pas pu être mis en cache : " + err.Error()})
+				res.Notes = append(res.Notes, Note{Document: name, Message: i18n.T("translate.note.not-cached", err)})
 			}
 		}
 		report(i, "", nil)
 	}
 
 	if err := book.SetLanguage(opts.TargetCode); err != nil {
-		res.Notes = append(res.Notes, Note{Document: book.OPFPath, Message: "langue du livre laissée inchangée : " + err.Error()})
+		res.Notes = append(res.Notes, Note{Document: book.OPFPath, Message: i18n.T("translate.note.language-kept", err)})
 	}
 	res.Duration = time.Since(started)
 	return res, nil

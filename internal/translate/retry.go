@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/blkmlo/tulipe/internal/epub"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 )
 
@@ -33,7 +34,7 @@ func RetryPending(ctx context.Context, p llm.Provider, opts Options, meta DocMet
 	if len(srcSegs) != len(prevSegs) {
 		// Refusing here is the honest answer: splicing against a structure
 		// that has drifted would put translations in the wrong places.
-		return nil, fmt.Errorf("%s : la structure du document a changé depuis la traduction (%d passages contre %d) ; relancez-le entièrement",
+		return nil, fmt.Errorf(i18n.T("translate.err.structure-changed"),
 			name, len(prevSegs), len(srcSegs))
 	}
 

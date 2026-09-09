@@ -11,6 +11,7 @@ import (
 
 	"github.com/blkmlo/tulipe/internal/config"
 	"github.com/blkmlo/tulipe/internal/epub"
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/blkmlo/tulipe/internal/translate"
 	"github.com/charmbracelet/bubbles/filepicker"
@@ -140,25 +141,25 @@ func startDirectory(startPath string) string {
 
 func buildMenu() []menuEntry {
 	return []menuEntry{
-		{"Traduire un EPUB", "choisir un fichier et lancer la traduction", func(m *Model) tea.Cmd {
+		{i18n.T("ui.menu.translate"), i18n.T("ui.menu.translate.detail"), func(m *Model) tea.Cmd {
 			m.screen = screenPicker
 			return m.picker.Init()
 		}},
-		{"Reprendre une traduction", "réutiliser les chapitres déjà traduits", func(m *Model) tea.Cmd {
+		{i18n.T("ui.menu.resume"), i18n.T("ui.menu.resume.detail"), func(m *Model) tea.Cmd {
 			m.screen = screenResume
 			return loadRuns
 		}},
-		{"Réglages", "modèle, langue, découpage, glossaire", func(m *Model) tea.Cmd {
+		{i18n.T("ui.menu.settings"), i18n.T("ui.menu.settings.detail"), func(m *Model) tea.Cmd {
 			m.settings = newSettingsForm(m.cfg)
 			m.screen = screenSettings
 			return nil
 		}},
-		{"Tester la connexion", "une requête minuscule pour vérifier le modèle", func(m *Model) tea.Cmd {
+		{i18n.T("ui.menu.test"), i18n.T("ui.menu.test.detail"), func(m *Model) tea.Cmd {
 			m.loading = true
 			m.notice, m.failure = "", ""
 			return tea.Batch(m.spin.Tick, testConnection(m.cfg))
 		}},
-		{"Quitter", "", func(m *Model) tea.Cmd { return tea.Quit }},
+		{i18n.T("ui.menu.quit"), "", func(m *Model) tea.Cmd { return tea.Quit }},
 	}
 }
 
@@ -324,11 +325,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		m.noticeOK = true
-		m.notice = fmt.Sprintf("Connexion établie — modèle %s. Réponse : %s", msg.model, truncate(msg.sample, 90))
+		m.notice = i18n.T("ui.test.ok", msg.model, truncate(msg.sample, 90))
 		if msg.usage.Reported {
-			m.notice += fmt.Sprintf("  (%d jetons entrants, %d sortants)", msg.usage.InputTokens, msg.usage.OutputTokens)
+			m.notice += i18n.T("ui.test.usage", msg.usage.InputTokens, msg.usage.OutputTokens)
 		} else {
-			m.notice += "  (ce fournisseur ne communique pas de décompte de jetons)"
+			m.notice += i18n.T("ui.test.no-usage")
 		}
 		return m, nil
 
@@ -339,7 +340,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		p := translate.Progress(msg)
 		m.run.progress = p
 		if p.Retry != nil {
-			m.run.appendLog(warnStyle.Render(fmt.Sprintf("nouvelle tentative %d dans %s — %v", p.Retry.Attempt, p.Retry.Wait.Round(time.Second), p.Retry.Err)))
+			m.run.appendLog(warnStyle.Render(i18n.T("ui.run.retry", p.Retry.Attempt, p.Retry.Wait.Round(time.Second), p.Retry.Err)))
 		} else if p.Message != "" {
 			m.run.appendLog(dimStyle.Render(p.Message))
 		}
@@ -394,7 +395,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if msg.String() == "esc" {
 			m.run.cancel()
-			m.run.appendLog(warnStyle.Render("annulation demandée…"))
+			m.run.appendLog(warnStyle.Render(i18n.T("ui.run.cancelling")))
 		}
 		return m, nil
 	case screenReport:
@@ -461,12 +462,12 @@ func (m Model) updateBook(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			_ = os.RemoveAll(m.cacheDir)
 			m.reusable, m.cacheDir = m.inspectCache()
 			m.pending = m.pendingCount()
-			m.notice, m.noticeOK = "Cache de reprise effacé : tout sera retraduit.", true
+			m.notice, m.noticeOK = i18n.T("ui.book.cache-cleared"), true
 		}
 		return m, nil
 	case "p":
 		if m.pending == 0 {
-			m.notice, m.noticeOK = "Aucun passage à reprendre pour ce livre.", false
+			m.notice, m.noticeOK = i18n.T("ui.book.nothing-pending"), false
 			return m, nil
 		}
 		m.retryOnly = true
@@ -505,7 +506,7 @@ func (m Model) updateResume(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		r := m.runs[m.runsIndex]
 		if _, err := os.Stat(r.Source); err != nil {
-			m.failure = fmt.Sprintf("le livre d'origine est introuvable : %s", r.Source)
+			m.failure = i18n.T("ui.resume.missing", r.Source)
 			return m, nil
 		}
 		m.cfg.TargetLanguage = r.TargetLanguage
@@ -589,7 +590,7 @@ func (m Model) bookTitle() string {
 // progress screen.
 func (m Model) startRun() (tea.Model, tea.Cmd) {
 	if m.book == nil || m.bookPath == "" {
-		m.failure = "aucun livre n'est chargé"
+		m.failure = i18n.T("ui.book.not-loaded")
 		m.screen = screenMenu
 		return m, nil
 	}
@@ -673,19 +674,19 @@ func writeBook(book *epub.Book, path, format string) (string, error) {
 // the worst possible moment.
 func checkWritable(path string) error {
 	if info, err := os.Stat(path); err == nil && info.IsDir() {
-		return fmt.Errorf("%s est un dossier ; indiquez un nom de fichier", path)
+		return fmt.Errorf(i18n.T("cli.err.is-a-directory"), path)
 	}
 	dir := filepath.Dir(path)
 	info, err := os.Stat(dir)
 	if err != nil {
-		return fmt.Errorf("dossier de sortie inaccessible : %w", err)
+		return fmt.Errorf(i18n.T("cli.err.output-dir"), err)
 	}
 	if !info.IsDir() {
-		return fmt.Errorf("%s n'est pas un dossier", dir)
+		return fmt.Errorf(i18n.T("cli.err.not-a-directory"), dir)
 	}
 	probe, err := os.CreateTemp(dir, ".tulipe-*")
 	if err != nil {
-		return fmt.Errorf("écriture impossible dans %s : %w", dir, err)
+		return fmt.Errorf(i18n.T("cli.err.cannot-write"), dir, err)
 	}
 	name := probe.Name()
 	probe.Close()
@@ -758,7 +759,7 @@ func slug(s string) string {
 	if out := strings.Trim(b.String(), "-"); out != "" {
 		return out
 	}
-	return "traduit"
+	return i18n.T("ui.slug-fallback")
 }
 
 func clamp(v, lo, hi int) int {

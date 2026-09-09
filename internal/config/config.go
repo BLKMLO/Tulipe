@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/blkmlo/tulipe/internal/translate"
 )
@@ -62,6 +63,12 @@ func (c Config) Endpoint() string {
 
 // Config is everything Tulipe remembers between runs.
 type Config struct {
+	// Language is the interface language: a code from i18n.Locales. It has
+	// nothing to do with TargetLanguage, which is what books are translated
+	// into; someone may well read a French interface while translating into
+	// Japanese.
+	Language string `json:"language,omitempty"`
+
 	Provider         string   `json:"provider"`
 	Model            string   `json:"model"`
 	BaseURL          string   `json:"base_url,omitempty"`
@@ -95,13 +102,15 @@ type Config struct {
 
 // Default is the configuration a first run starts from.
 func Default() Config {
+	target := defaultTarget()
 	return Config{
+		Language:         i18n.DefaultLocale,
 		Provider:         ProviderAnthropic,
 		Model:            llm.DefaultAnthropicModel,
 		Effort:           "medium",
 		StructuredOutput: true,
-		TargetLanguage:   "français",
-		TargetCode:       "fr",
+		TargetLanguage:   target.Name,
+		TargetCode:       target.Code,
 		ChunkChars:       4000,
 		MaxSegments:      40,
 		MaxTokens:        16000,
@@ -156,6 +165,9 @@ func (c Config) Save() error {
 }
 
 func (c Config) normalise() Config {
+	if !i18n.Known(c.Language) {
+		c.Language = i18n.DefaultLocale
+	}
 	if c.Provider == "" {
 		c.Provider = ProviderAnthropic
 	}
@@ -200,35 +212,35 @@ var languageTag = regexp.MustCompile(`^[A-Za-z0-9]{1,8}(-[A-Za-z0-9]{1,8})*$`)
 func (c Config) Validate() error {
 	preset, known := c.Preset()
 	if !known {
-		return fmt.Errorf("fournisseur inconnu %q ; connus : %s", c.Provider, strings.Join(llm.PresetIDs(), ", "))
+		return fmt.Errorf(i18n.T("config.err.unknown-provider"), c.Provider, strings.Join(llm.PresetIDs(), ", "))
 	}
 	if preset.Kind != llm.KindDeepL && strings.TrimSpace(c.Model) == "" {
-		return errors.New("aucun modèle indiqué")
+		return errors.New(i18n.T("config.err.no-model"))
 	}
 	if strings.TrimSpace(c.TargetLanguage) == "" {
-		return errors.New("aucune langue cible indiquée")
+		return errors.New(i18n.T("config.err.no-target-language"))
 	}
 	endpoint := c.Endpoint()
 	if preset.Kind == llm.KindOpenAI && strings.TrimSpace(endpoint) == "" {
-		return errors.New("un service compatible OpenAI exige une URL de base (par exemple http://localhost:11434/v1)")
+		return errors.New(i18n.T("config.err.needs-base-url"))
 	}
 	if strings.Contains(endpoint, "{") {
-		return fmt.Errorf("l'URL de base contient encore un champ à compléter : %s", endpoint)
+		return fmt.Errorf(i18n.T("config.err.base-url-blank"), endpoint)
 	}
 	if preset.Kind == llm.KindDeepL && strings.TrimSpace(c.TargetCode) == "" {
-		return errors.New("DeepL exige un code de langue cible ; renseignez « Code de langue »")
+		return errors.New(i18n.T("config.err.deepl-needs-code"))
 	}
 	if endpoint != "" {
 		u, err := url.Parse(endpoint)
 		if err != nil || u.Scheme == "" || u.Host == "" {
-			return fmt.Errorf("URL de base invalide %q ; attendu une adresse complète comme http://localhost:11434/v1", endpoint)
+			return fmt.Errorf(i18n.T("config.err.invalid-base-url"), endpoint)
 		}
 		if u.Scheme != "http" && u.Scheme != "https" {
-			return fmt.Errorf("URL de base en %q ; seuls http et https sont acceptés", u.Scheme)
+			return fmt.Errorf(i18n.T("config.err.bad-scheme"), u.Scheme)
 		}
 	}
 	if c.Effort != "" && preset.Kind == llm.KindAnthropic && !slices.Contains(Efforts, c.Effort) {
-		return fmt.Errorf("effort inconnu %q ; attendu %s", c.Effort, strings.Join(Efforts, ", "))
+		return fmt.Errorf(i18n.T("config.err.unknown-effort"), c.Effort, strings.Join(Efforts, ", "))
 	}
 	for _, f := range []struct {
 		name string
@@ -243,7 +255,7 @@ func (c Config) Validate() error {
 		{"--timeout", c.TimeoutSeconds, 1},
 	} {
 		if f.v < f.min {
-			return fmt.Errorf("%s vaut %d ; le minimum est %d", f.name, f.v, f.min)
+			return fmt.Errorf(i18n.T("config.err.below-minimum"), f.name, f.v, f.min)
 		}
 	}
 	// These go straight into every request. A caller is free to be generous,
@@ -258,10 +270,10 @@ func (c Config) Validate() error {
 		{"--from", c.SourceLanguage, 100},
 		{"--about", c.About, 2000},
 		{"--style", c.StyleNotes, 10000},
-		{"le glossaire", c.Glossary, 200000},
+		{i18n.T("config.field.glossary"), c.Glossary, 200000},
 	} {
 		if n := len([]rune(field.value)); n > field.max {
-			return fmt.Errorf("%s fait %d caractères ; le maximum est %d", field.name, n, field.max)
+			return fmt.Errorf(i18n.T("config.err.too-long"), field.name, n, field.max)
 		}
 	}
 	for _, tag := range []struct{ name, value string }{
@@ -269,19 +281,22 @@ func (c Config) Validate() error {
 		{"--from-code", c.SourceCode},
 	} {
 		if tag.value != "" && !languageTag.MatchString(tag.value) {
-			return fmt.Errorf("%s vaut %q ; attendu une étiquette de langue comme fr, en-GB ou pt-BR", tag.name, tag.value)
+			return fmt.Errorf(i18n.T("config.err.bad-language-tag"), tag.name, tag.value)
 		}
 	}
+	if c.Language != "" && !i18n.Known(c.Language) {
+		return fmt.Errorf(i18n.T("config.err.unknown-locale"), c.Language, strings.Join(i18n.Locales, ", "))
+	}
 	if !slices.Contains(Formats, c.Format) {
-		return fmt.Errorf("format de sortie inconnu %q ; attendu %s", c.Format, strings.Join(Formats, " ou "))
+		return fmt.Errorf(i18n.T("config.err.unknown-format"), c.Format, strings.Join(Formats, ", "))
 	}
 	if c.OutputDir != "" {
 		info, err := os.Stat(c.OutputDir)
 		if err != nil {
-			return fmt.Errorf("dossier de sortie inutilisable : %w", err)
+			return fmt.Errorf(i18n.T("config.err.output-dir-unusable"), err)
 		}
 		if !info.IsDir() {
-			return fmt.Errorf("le dossier de sortie %q n'est pas un dossier", c.OutputDir)
+			return fmt.Errorf(i18n.T("config.err.output-dir-not-dir"), c.OutputDir)
 		}
 	}
 	return nil
@@ -311,20 +326,20 @@ func (c Config) ResolveAPIKey() (key, source string) {
 func (c Config) KeyStatus() string {
 	key, source := c.ResolveAPIKey()
 	if key != "" {
-		return "définie (" + source + ")"
+		return i18n.T("config.key.set", source)
 	}
 	preset, ok := c.Preset()
 	switch {
 	case ok && preset.Kind == llm.KindAnthropic:
 		// The SDK also accepts a profile created by `ant auth login`, so an
 		// empty key is not necessarily a problem.
-		return "absente ici — le SDK Anthropic cherchera ses propres identifiants"
+		return i18n.T("config.key.anthropic-sdk")
 	case ok && preset.NoKey:
-		return "inutile pour ce service"
+		return i18n.T("config.key.not-needed")
 	case ok && len(preset.KeyEnv) > 0:
-		return "absente — attendue dans " + strings.Join(preset.KeyEnv, " ou ")
+		return i18n.T("config.key.expected-in", strings.Join(preset.KeyEnv, i18n.T("cli.providers.or")))
 	default:
-		return "absente"
+		return i18n.T("config.key.missing")
 	}
 }
 
@@ -333,7 +348,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 	key, _ := c.ResolveAPIKey()
 	preset, ok := c.Preset()
 	if !ok {
-		return nil, fmt.Errorf("fournisseur inconnu %q ; connus : %s", c.Provider, strings.Join(llm.PresetIDs(), ", "))
+		return nil, fmt.Errorf(i18n.T("config.err.unknown-provider"), c.Provider, strings.Join(llm.PresetIDs(), ", "))
 	}
 	timeout := time.Duration(c.TimeoutSeconds) * time.Second
 	switch preset.Kind {
@@ -361,7 +376,7 @@ func (c Config) NewProvider() (llm.Provider, error) {
 			Timeout: timeout,
 		})
 	default:
-		return nil, fmt.Errorf("protocole inconnu %q pour le fournisseur %q", preset.Kind, c.Provider)
+		return nil, fmt.Errorf(i18n.T("config.err.unknown-protocol"), preset.Kind, c.Provider)
 	}
 }
 
@@ -429,6 +444,19 @@ var Languages = []Language{
 	{"日本語", "ja"},
 	{"中文 (简体)", "zh-Hans"},
 	{"العربية", "ar"},
+}
+
+// defaultTarget is the language a first run translates into. It follows the
+// language the interface starts in — someone reading an English interface most
+// likely wants an English book — and is a setting of its own from then on:
+// changing the interface language never touches it again.
+func defaultTarget() Language {
+	for _, l := range Languages {
+		if l.Code == i18n.DefaultLocale {
+			return l
+		}
+	}
+	return Languages[0]
 }
 
 // LookupLanguage finds the BCP 47 tag of a language named in the picker.

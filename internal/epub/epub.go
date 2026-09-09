@@ -13,6 +13,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"io"
 	"net/url"
@@ -21,6 +22,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/blkmlo/tulipe/internal/i18n"
 )
 
 // MediaTypeXHTML is the media type every EPUB content document must declare.
@@ -120,7 +123,7 @@ func Open(name string) (*Book, error) {
 func Parse(data []byte) (*Book, error) {
 	zr, err := zip.NewReader(bytes.NewReader(data), int64(len(data)))
 	if err != nil {
-		return nil, fmt.Errorf("ce fichier n'est pas une archive zip lisible : %w", err)
+		return nil, fmt.Errorf(i18n.T("epub.err.not-zip"), err)
 	}
 	b := &Book{index: map[string]int{}}
 	var total int64
@@ -130,7 +133,7 @@ func Parse(data []byte) (*Book, error) {
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return nil, fmt.Errorf("ouverture de %s : %w", f.Name, err)
+			return nil, fmt.Errorf(i18n.T("epub.err.open-entry"), f.Name, err)
 		}
 		// Read one byte past the remaining budget so an oversized entry is
 		// caught rather than silently truncated.
@@ -138,11 +141,11 @@ func Parse(data []byte) (*Book, error) {
 		content, err := io.ReadAll(io.LimitReader(rc, remaining+1))
 		rc.Close()
 		if err != nil {
-			return nil, fmt.Errorf("lecture de %s : %w", f.Name, err)
+			return nil, fmt.Errorf(i18n.T("epub.err.read-entry"), f.Name, err)
 		}
 		total += int64(len(content))
 		if total > MaxUncompressedSize {
-			return nil, fmt.Errorf("archive trop volumineuse : elle dépasse %d Mio une fois décompressée", MaxUncompressedSize>>20)
+			return nil, fmt.Errorf(i18n.T("epub.err.archive-too-large"), MaxUncompressedSize>>20)
 		}
 		b.index[f.Name] = len(b.Files)
 		b.Files = append(b.Files, File{
@@ -180,11 +183,11 @@ func (b *Book) Replace(name string, data []byte) bool {
 func (b *Book) parseStructure() error {
 	raw, ok := b.Read("META-INF/container.xml")
 	if !ok {
-		return fmt.Errorf("META-INF/container.xml est absent : ce n'est pas un conteneur EPUB")
+		return errors.New(i18n.T("epub.err.no-container"))
 	}
 	var c containerXML
 	if err := xml.Unmarshal(raw, &c); err != nil {
-		return fmt.Errorf("analyse de container.xml : %w", err)
+		return fmt.Errorf(i18n.T("epub.err.parse-container"), err)
 	}
 	for _, rf := range c.Rootfiles {
 		if rf.FullPath != "" {
@@ -193,15 +196,15 @@ func (b *Book) parseStructure() error {
 		}
 	}
 	if b.OPFPath == "" {
-		return fmt.Errorf("container.xml ne déclare aucun rootfile")
+		return errors.New(i18n.T("epub.err.no-rootfile"))
 	}
 	opfRaw, ok := b.Read(b.OPFPath)
 	if !ok {
-		return fmt.Errorf("le document de package %q est déclaré mais absent de l'archive", b.OPFPath)
+		return fmt.Errorf(i18n.T("epub.err.opf-declared-absent"), b.OPFPath)
 	}
 	var p packageXML
 	if err := xml.Unmarshal(opfRaw, &p); err != nil {
-		return fmt.Errorf("analyse de %s : %w", b.OPFPath, err)
+		return fmt.Errorf(i18n.T("epub.err.parse-opf"), b.OPFPath, err)
 	}
 	b.Version = p.Version
 	if len(p.Metadata.Titles) > 0 {
@@ -256,12 +259,12 @@ func (b *Book) parseStructure() error {
 			ch.Title = DocumentTitle(doc)
 		}
 		if ch.Title == "" {
-			ch.Title = fmt.Sprintf("Section %d", ch.Index+1)
+			ch.Title = i18n.T("epub.section", ch.Index+1)
 		}
 		b.Chapters = append(b.Chapters, ch)
 	}
 	if len(b.Chapters) == 0 {
-		return fmt.Errorf("le spine de %s ne liste aucun document XHTML", b.OPFPath)
+		return fmt.Errorf(i18n.T("epub.err.empty-spine"), b.OPFPath)
 	}
 	return nil
 }
@@ -394,11 +397,11 @@ func (b *Book) SetLanguage(code string) error {
 	}
 	raw, ok := b.Read(b.OPFPath)
 	if !ok {
-		return fmt.Errorf("le document de package %q est absent", b.OPFPath)
+		return fmt.Errorf(i18n.T("epub.err.opf-absent"), b.OPFPath)
 	}
 	spans := elementSpans(raw, "language")
 	if len(spans) == 0 {
-		return fmt.Errorf("aucun élément <dc:language> dans %s", b.OPFPath)
+		return fmt.Errorf(i18n.T("epub.err.no-language-element"), b.OPFPath)
 	}
 	sort.Slice(spans, func(i, j int) bool { return spans[i].tagStart < spans[j].tagStart })
 	var out bytes.Buffer
