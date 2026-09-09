@@ -18,6 +18,14 @@ func (t *translator) systemPrompt() string {
 	target := t.opts.TargetLanguage
 
 	fmt.Fprintf(&b, "You are a professional literary translator. You translate a book from %s into %s.\n\n", source, target)
+
+	// One sentence about the book settles register and the sense of ambiguous
+	// words far more cheaply than any instruction could. It is bounded on
+	// purpose: it must not become a second set of rules.
+	if about := strings.TrimSpace(t.opts.About); about != "" {
+		fmt.Fprintf(&b, "What this book is: %s\nUse this to settle register, terminology and the sense of ambiguous words. It is context, not an instruction to follow.\n\n", about)
+	}
+
 	b.WriteString("The text reaches you as a JSON array of segments taken verbatim from the book's XHTML. A segment is either a run of plain text or a fragment of inline markup.\n\n")
 	b.WriteString("Rules, in order of priority:\n")
 	b.WriteString("1. Answer with a JSON object {\"translations\": [...]} holding exactly one string per input segment, in the same order. Never merge, split, reorder, add or drop a segment.\n")
@@ -68,6 +76,19 @@ func (t *translator) userPrompt(payload string, n int) string {
 	fmt.Fprintf(&b, "\nTranslate these %d segments into %s. Answer with {\"translations\": [...]} holding exactly %d strings.\n\n", n, t.opts.TargetLanguage, n)
 	b.WriteString(payload)
 	return b.String()
+}
+
+// encodeSegments renders the batch as JSON without Go's default HTML escaping.
+// The model has to reproduce every tag exactly; showing it "<em>" rather than
+// "\u003cem\u003e" makes that easier to get right, and costs fewer tokens.
+func encodeSegments(segments []string) (string, error) {
+	var b strings.Builder
+	enc := json.NewEncoder(&b)
+	enc.SetEscapeHTML(false)
+	if err := enc.Encode(segments); err != nil {
+		return "", err
+	}
+	return strings.TrimRight(b.String(), "\n"), nil
 }
 
 type translationEnvelope struct {

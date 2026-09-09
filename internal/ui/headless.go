@@ -17,7 +17,7 @@ import (
 // RunHeadless translates a book without the interactive interface. Progress is
 // written to standard error so that standard output carries only the path of
 // the finished book, which keeps the command usable in a pipeline.
-func RunHeadless(ctx context.Context, cfg config.Config, source, output string, quiet bool) error {
+func RunHeadless(ctx context.Context, cfg config.Config, source, output string, retry, quiet bool) error {
 	book, err := epub.Open(source)
 	if err != nil {
 		return err
@@ -31,7 +31,7 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 		output = outputPath(cfg, source)
 	}
 
-	opts := translate.BookOptions{Options: cfg.TranslateOptions()}
+	opts := translate.BookOptions{Options: cfg.TranslateOptions(), RetryPending: retry}
 	if cfg.Resume {
 		if fp, err := translate.Fingerprint(source); err == nil {
 			title := book.Title
@@ -93,6 +93,9 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 
 	log("")
 	log("segments  %s", segmentsPlain(translated, total))
+	if p := res.Pending(); p > 0 {
+		log("en attente %d passage(s) laissés en langue source — « tulipe translate --retry » pour les reprendre", p)
+	}
 	log("requêtes  %s", requestsPlain(res.Requests, res.Attempted))
 	log("jetons    %s", usagePlain(res.Usage, res.Attempted))
 	log("durée     %s", res.Duration.Round(time.Second))

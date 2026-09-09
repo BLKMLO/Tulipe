@@ -98,6 +98,9 @@ func (m Model) viewBook() string {
 	if m.reusable > 0 {
 		rows = append(rows, labelStyle.Render("reprise      ")+okStyle.Render(fmt.Sprintf("%d document(s) déjà traduits seront réutilisés", m.reusable)))
 	}
+	if m.pending > 0 {
+		rows = append(rows, labelStyle.Render("en attente   ")+warnStyle.Render(fmt.Sprintf("%d passage(s) laissés en langue source", m.pending)))
+	}
 	b.WriteString(panelStyle.Render(strings.Join(rows, "\n")))
 
 	b.WriteString("\n\n" + labelStyle.Render("chapitres") + "\n")
@@ -112,7 +115,12 @@ func (m Model) viewBook() string {
 
 	b.WriteString("\n" + dimStyle.Render("Le livre est traduit un document à la fois, puis découpé en requêtes de "+
 		fmt.Sprintf("%d caractères au plus : le contexte du modèle ne porte jamais le livre entier.", m.cfg.ChunkChars)))
-	b.WriteString("\n\n" + help("entrée", "traduire", "r", "vider le cache de reprise", "échap", "retour"))
+	keys := []string{"entrée", "traduire"}
+	if m.pending > 0 {
+		keys = append(keys, "p", "reprendre les passages en attente")
+	}
+	keys = append(keys, "r", "vider le cache de reprise", "échap", "retour")
+	b.WriteString("\n\n" + help(keys...))
 	return b.String()
 }
 
@@ -189,7 +197,9 @@ func docLine(d translate.DocState, current bool, spin string) string {
 	case d.Status == translate.StatusFailed && d.Err != nil:
 		line += errStyle.Render("  " + truncate(d.Err.Error(), 50))
 	}
-	if d.Notes > 0 {
+	if d.Pending > 0 {
+		line += warnStyle.Render(fmt.Sprintf("  ⚑ %d", d.Pending))
+	} else if d.Notes > 0 {
 		line += warnStyle.Render(fmt.Sprintf("  ⚑ %d", d.Notes))
 	}
 	return line
@@ -256,7 +266,11 @@ func (m Model) viewReport() string {
 		}
 	}
 
-	b.WriteString("\n" + help("entrée", "retour au menu"))
+	if m.result.Retryable() {
+		b.WriteString("\n\n" + help("p", "reprendre les passages non traduits", "entrée", "retour au menu"))
+	} else {
+		b.WriteString("\n\n" + help("entrée", "retour au menu"))
+	}
 	return b.String()
 }
 
@@ -273,8 +287,11 @@ func (m Model) viewResume() string {
 		if label == "" {
 			label = r.Source
 		}
-		detail := fmt.Sprintf("→ %s · %s · %d document(s) en cache · %s",
-			r.TargetLanguage, r.Model, r.Done(), r.UpdatedAt.Format("2006-01-02 15:04"))
+		detail := fmt.Sprintf("→ %s · %s · %d document(s) en cache", r.TargetLanguage, r.Model, r.Done())
+		if p := r.Pending(); p > 0 {
+			detail += fmt.Sprintf(" · %d passage(s) à reprendre", p)
+		}
+		detail += " · " + r.UpdatedAt.Format("2006-01-02 15:04")
 		b.WriteString(selectLine(i == m.runsIndex, truncate(label, 50), detail) + "\n")
 	}
 	b.WriteString("\n" + help("entrée", "reprendre", "d", "supprimer du cache", "échap", "retour"))

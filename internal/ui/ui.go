@@ -60,6 +60,10 @@ type Model struct {
 	outPath  string
 	cacheDir string
 	reusable int
+	// pending is how many passages an earlier run left in the source language
+	// for this book; retryOnly asks the next run to retry just those.
+	pending   int
+	retryOnly bool
 
 	run      *runState
 	result   *translate.Result
@@ -294,6 +298,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.bookPath, m.book, m.stats = msg.path, msg.book, msg.stats
 		m.outPath = outputPath(m.cfg, msg.path)
 		m.reusable, m.cacheDir = m.inspectCache()
+		m.pending = m.pendingCount()
 		m.screen = screenBook
 		return m, nil
 
@@ -389,6 +394,13 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case screenReport:
 		switch msg.String() {
+		case "p":
+			if m.result == nil || !m.result.Retryable() || m.book == nil {
+				return m, nil
+			}
+			m.retryOnly = true
+			m.result = nil
+			return m.startRun()
 		case "esc", "enter", "q":
 			m.screen = screenMenu
 			m.result = nil
@@ -443,10 +455,19 @@ func (m Model) updateBook(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.cacheDir != "" {
 			_ = os.RemoveAll(m.cacheDir)
 			m.reusable, m.cacheDir = m.inspectCache()
+			m.pending = m.pendingCount()
 			m.notice, m.noticeOK = "Cache de reprise effacé : tout sera retraduit.", true
 		}
 		return m, nil
+	case "p":
+		if m.pending == 0 {
+			m.notice, m.noticeOK = "Aucun passage à reprendre pour ce livre.", false
+			return m, nil
+		}
+		m.retryOnly = true
+		return m.startRun()
 	case "enter":
+		m.retryOnly = false
 		return m.startRun()
 	}
 	return m, nil
@@ -525,6 +546,15 @@ func (m Model) inspectCache() (int, string) {
 	return n, cache.Dir()
 }
 
+// pendingInCache counts the passages an earlier run left in the source
+// language for this book.
+func (m Model) pendingCount() int {
+	if m.cacheDir == "" {
+		return 0
+	}
+	return translate.RunInfo{Dir: m.cacheDir}.Pending()
+}
+
 func (m Model) bookTitle() string {
 	if m.book != nil && m.book.Title != "" {
 		return m.book.Title
@@ -545,7 +575,7 @@ func (m Model) startRun() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	opts := translate.BookOptions{Options: m.cfg.TranslateOptions()}
+	opts := translate.BookOptions{Options: m.cfg.TranslateOptions(), RetryPending: m.retryOnly}
 	if m.cfg.Resume {
 		fp, err := translate.Fingerprint(m.bookPath)
 		if err == nil {

@@ -75,6 +75,8 @@ type Config struct {
 	SourceCode     string `json:"source_code,omitempty"`
 	Glossary       string `json:"glossary,omitempty"`
 	StyleNotes     string `json:"style_notes,omitempty"`
+	// About describes the book in one sentence, to calibrate the translation.
+	About string `json:"about,omitempty"`
 
 	ChunkChars   int   `json:"chunk_chars"`
 	MaxSegments  int   `json:"max_segments"`
@@ -352,6 +354,7 @@ func (c Config) Recipe() translate.Recipe {
 		SourceCode:     c.SourceCode,
 		Glossary:       c.Glossary,
 		StyleNotes:     c.StyleNotes,
+		About:          c.About,
 	}
 }
 
@@ -363,6 +366,7 @@ func (c Config) TranslateOptions() translate.Options {
 		SourceLanguage: c.SourceLanguage,
 		Glossary:       c.Glossary,
 		StyleNotes:     c.StyleNotes,
+		About:          c.About,
 		ChunkChars:     c.ChunkChars,
 		MaxSegments:    c.MaxSegments,
 		MaxTokens:      c.MaxTokens,

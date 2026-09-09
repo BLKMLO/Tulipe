@@ -51,8 +51,9 @@ atteint : relancez, Tulipe reprend au chapitre suivant. Vous ne repayez jamais
 un chapitre déjà traduit.
 
 **Aucun échec silencieux.** Si un passage n'a pas pu être traduit, il reste en
-langue d'origine et Tulipe vous le dit, en le situant. Vous ne découvrirez pas
-au chapitre 12 qu'une clé invalide vous a rendu une copie de l'original.
+langue d'origine, Tulipe vous le dit et vous propose de le reprendre — sans
+repayer le chapitre. Vous ne découvrirez pas au chapitre 12 qu'une clé
+invalide vous a rendu une copie de l'original.
 
 ## Installation
 
@@ -186,6 +187,47 @@ la clé n'est jamais affichée ni écrite dans un journal.
 balise. Pratique pour relire, comparer deux traductions, ou passer le texte à
 un autre outil.
 
+## Reprendre les passages manqués
+
+Il arrive qu'un modèle bute sur un paragraphe : réponse vide, balisage abîmé,
+sortie aberrante. Tulipe garde alors le texte d'origine plutôt que d'insérer
+quelque chose de douteux, et marque le passage d'un drapeau.
+
+À la fin de la traduction, il vous propose de les reprendre :
+
+```
+✗ 3 passage(s) laissés en langue source
+
+p reprendre les passages non traduits  •  entrée retour au menu
+```
+
+Seuls ces passages sont renvoyés au modèle — trois paragraphes coûtent trois
+paragraphes, pas trois chapitres. La proposition réapparaît quand vous rouvrez
+le livre, et dans la liste « Reprendre une traduction ».
+
+En ligne de commande :
+
+```bash
+tulipe translate --retry --to français --code fr mon-livre.epub
+```
+
+## Dire au modèle de quoi parle le livre
+
+Une phrase suffit à caler le registre et à lever les ambiguïtés — « bar » n'a
+pas le même sens dans un roman noir et dans un manuel de physique.
+
+```bash
+tulipe translate --about "un roman noir new-yorkais des années 1950" \
+                 --to français --code fr mon-livre.epub
+```
+
+Dans l'interface, c'est le champ **Contexte du livre** des réglages. Laissé
+vide, rien n'est ajouté au prompt.
+
+Cette phrase est présentée au modèle comme du contexte, jamais comme une
+consigne : elle ne peut pas se substituer aux règles qui protègent votre
+fichier.
+
 ## Une traduction cohérente sur 300 pages
 
 Un livre découpé en centaines de requêtes risque de dériver : le même
@@ -211,6 +253,7 @@ est conservé, et le passage est signalé dans le rapport de fin.
 | Ce qui arrive | Ce que fait Tulipe |
 |---|---|
 | Le modèle répond de travers | il réessaie, puis découpe le lot en deux, jusqu'au paragraphe isolé |
+| Un paragraphe reste intraduisible | le texte d'origine est gardé, et proposé à la reprise |
 | Le balisage revient cassé | le passage d'origine est gardé et signalé |
 | Le service est surchargé | nouvelle tentative, en attendant de plus en plus longtemps |
 | Le service ne répond plus | l'appel est abandonné après un délai, puis réessayé |
@@ -275,8 +318,8 @@ Les chapitres traduits sont conservés dans le dossier de cache de votre systèm
 (`~/.cache/tulipe/` sous Linux). Relancer le même livre reprend là où il s'était arrêté ; l'entrée « Reprendre une traduction »
 du menu liste les travaux en attente, et `--no-resume` ignore le cache.
 
-Changer de modèle, de langue, de glossaire ou de consignes relance une
-traduction neuve : le cache tient compte de tout ce qui modifie le résultat.
+Changer de modèle, de langue, de glossaire, de contexte ou de consignes relance
+une traduction neuve : le cache tient compte de tout ce qui modifie le résultat.
 Régler la taille des lots, en revanche, ne le jette pas.
 
 ### Options de `translate`
@@ -294,6 +337,8 @@ Régler la taille des lots, en revanche, ne le jette pas.
 -o               fichier de sortie
 --glossary-file  glossaire, une règle « source = cible » par ligne
 --style          consignes de style ajoutées aux instructions
+--about          le livre en une phrase, pour caler le registre
+--retry          reprendre les passages laissés en langue source
 --no-resume      repartir de zéro, sans réutiliser le cache
 --quiet          n'afficher que le chemin du fichier produit
 ```
