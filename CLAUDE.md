@@ -45,6 +45,9 @@ cmd/tulipe        drapeaux, aiguillage TUI / sans interface
               └── internal/llm   fournisseurs (Anthropic, compatible OpenAI)
 
 internal/i18n     catalogue des messages ; importé par tous, n'importe personne
+
+assets/           l'illustration et ce qui en dérive ; aucun code de Tulipe
+                  ne l'importe — voir « L'icône » plus bas
 ```
 
 `epub` et `llm` ne connaissent ni `translate` ni `ui`. `translate` ne connaît pas
@@ -136,6 +139,38 @@ traduction revient légitimement avec le `&amp;` qu'on lui a donné.
 `NormaliseText` laisse passer une référence d'entité déjà valide et n'échappe
 que le reste ; un échappement aveugle afficherait `&amp;amp;` au lecteur.
 
+## Traduire les titres, ou non
+
+`Config.TranslateTitles` (par défaut vrai) décide si les titres de chapitre et
+la table des matières partent au modèle. Trois choses à ne pas confondre.
+
+D'abord, **le champ est inversé entre les deux couches**. La configuration
+porte `TranslateTitles`, qui est ce que l'utilisateur lit ; `translate.Options`
+porte `KeepOriginalTitles`, qui est son contraire. La raison est la valeur
+zéro : un appelant qui oublie le réglage doit obtenir « tout traduire », c'est-
+à-dire l'ancien comportement. Un `TranslateTitles` dans `Options` aurait fait
+taire les titres de tout appelant distrait — et c'est exactement ce qui est
+arrivé aux tests de `translate` avant l'inversion. Côté configuration le
+problème ne se pose pas : `Load` part de `Default()`, donc une clé absente d'un
+vieux fichier garde la valeur par défaut.
+
+Ensuite, **les segments sont marqués, pas retirés**. `epub.Extract` renvoie un
+titre comme n'importe quel segment, avec `Segment.Title` à vrai.
+`translate.translatable` restreint ensuite l'envoi et garde `numbers`, la carte
+vers les indices du document entier. Filtrer dans `Extract` aurait décalé la
+numérotation, donc les `Note`, la liste `Pending` et le fichier `.pending` :
+un cache écrit sous un réglage ne se relirait plus sous l'autre.
+
+Enfin, **la table des matières suit le même réglage**. Elle ne contient que des
+titres ; `DocMeta.Navigation`, posé par `Book` d'après `book.NavPath` et
+`book.NCXPath`, la fait basculer en entier. Un document de navigation dont tous
+les segments sont écartés sort avec `Segments == 0`, ce qui n'est pas un échec :
+le contrôle « rien traduit » ne se déclenche que si `Segments > 0`.
+
+`RetryPending` applique le réglage aussi (`dropTitles`) : une liste `.pending`
+écrite quand les titres étaient traduits nomme encore des titres, et les
+renvoyer traduirait ce que l'utilisateur a demandé de garder.
+
 ## Le rendu texte
 
 `epub.PlainText` et `Book.PlainText` produisent la sortie `--format txt`. C'est
@@ -164,7 +199,10 @@ Dans `internal/translate` :
 - Une chaîne de traduction vide veut dire « garder la source » : c'est le
   contrat entre `translateRange` et `epub.Apply`.
 - Tout rejet produit une `Note`. **Rien n'est jamais écarté en silence** ; le
-  rapport de fin les affiche toutes.
+  rapport de fin les affiche toutes. Une note qui parle du document entier
+  (« pas mis en cache », « seconde tentative échouée ») se construit avec
+  `docNote`, qui pose `Segment` à -1 : zéro est un vrai numéro de paragraphe,
+  et laisser le champ à sa valeur nulle faisait désigner le premier.
 - Les contrôles d'acceptation sont dans `accept`. En ajouter un veut dire
   ajouter aussi un test dans `translate_test.go`, sur le modèle de
   `TestBrokenMarkupIsRejected`.
@@ -192,6 +230,9 @@ supposition retraduirait le livre entier. `pendingOf` porte cette distinction.
 Une reprise qui échoue ne perd rien : `Book` remet le document précédent et
 note l'échec.
 
+C'est la même mécanique que la seconde tentative automatique décrite plus bas ;
+la différence est qui la déclenche et avec quels réglages.
+
 ## Ce qui ne doit jamais planter
 
 Trois campagnes tiennent cette propriété, et il faut les garder vertes :
@@ -206,6 +247,14 @@ Trois campagnes tiennent cette propriété, et il faut les garder vertes :
   échec après les corrections décrites plus bas.
 - `TestValidateNeverPanics` combine des valeurs absurdes dans tous les champs
   de configuration à la fois.
+
+Une liste plus longue que le terminal se fenêtre au lieu de déborder :
+`Model.listRows(chrome)` dit combien de lignes restent une fois les parties
+fixes de la vue servies, jamais moins de trois, et l'écran centre la fenêtre
+sur la sélection en annonçant ce qui dépasse (`ui.list.more-above`,
+`ui.list.more-below`). Chaque écran déclare sa propre constante de chrome
+(`settingsChrome`, `modelsChrome`) : c'est ce qui doit être mis à jour quand on
+ajoute une ligne fixe à une vue, sinon le bas se fait manger.
 
 Règle qui en découle : **une liste bornée par un indice se borne au moment de
 l'utiliser**, pas au moment de le modifier. `clampIndex` existe pour ça ; s'en
@@ -244,6 +293,37 @@ chapitre.
 `Extract` borne donc chaque bloc à `lastEnd`, la fin du dernier jeton vu à
 l'intérieur, et n'accepte la position rapportée que si `closesTag` confirme que
 la source contient bien la balise fermante annoncée.
+
+## La seconde tentative
+
+`salvage.go` renvoie, une fois le livre terminé, les passages restés en langue
+source. Ce n'est pas la même requête deux fois : les lots sont plafonnés à
+quatre segments (`salvageMaxSegments`, `salvageChunkChars`) et
+`Options.Salvage` ajoute au prompt une phrase disant que le lot est déjà revenu
+inexploitable une fois. **Rien n'y est assoupli** : `accept` applique
+exactement les mêmes contrôles. C'est la forme de la requête qui change, pas
+les règles.
+
+Quatre décisions à ne pas défaire :
+
+- **Elle attend la fin du livre.** Un service qui a une mauvaise minute n'en a
+  plus vingt chapitres plus loin, et l'utilisateur a un livre complet à lire
+  dans les deux cas.
+- **Elle ne reprend que des passages, jamais un chapitre entier.** Un document
+  en échec n'a pas été remplacé : il n'y a rien où recoller, et le relancer
+  ferait payer le chapitre une seconde fois.
+- **Le compteur d'échecs repart de zéro** (`salvageOptions` alloue un
+  `failureCounter` neuf). Le disjoncteur sert à détecter un service qui ne
+  répond plus, et celui qui vient de traduire un livre répond. Il peut encore
+  s'armer pendant la passe ; si c'est le cas, rien n'est perdu, chaque document
+  garde ce que la première passe lui a donné.
+- **`Salvage` n'entre pas dans `Recipe`.** Il change *combien* de passages
+  reviennent, pas *ce que dit* l'un d'eux. L'activer ne doit pas jeter le cache.
+
+`BookOptions.Fallback` est la couture prévue pour la version suivante : la
+passe prend le fournisseur en paramètre, et `nil` — le cas courant aujourd'hui —
+veut dire « le même service réessaie ». `TestSalvagePassAsksTheFallbackWhenThereIsOne`
+la couvre, pour qu'elle ne soit pas du code mort en attendant.
 
 ## Le disjoncteur
 
@@ -287,7 +367,11 @@ clé du cache. Ajouter un réglage qui influence la traduction sans l'ajouter à
 `Recipe` fait resservir en silence une traduction obtenue sous d'autres
 réglages — un utilisateur qui corrige son glossaire récupérerait l'ancienne
 version. `TestRecipeKeyChangesWithEverySemanticSetting` verrouille cette
-propriété.
+propriété : il parcourt la structure **par réflexion** plutôt qu'une liste
+écrite à la main, parce qu'un champ ajouté puis oublié dans la liste est
+précisément le trou que ce test existe pour fermer. Le prix est qu'il faut lui
+apprendre chaque nouvelle sorte de champ — il échoue franchement sur un type
+qu'il ne sait pas faire varier.
 
 Le découpage (`ChunkChars`, `MaxSegments`) est délibérément hors de `Recipe` :
 le régler ne doit pas jeter le cache.
@@ -429,6 +513,31 @@ régresser :
 Avant de toucher à ce fichier, consulter la compétence `claude-api` : les
 paramètres de l'API ont changé récemment et la mémoire du modèle est périmée.
 
+## L'icône
+
+Elle n'existe vraiment que sur Windows. `cmd/tulipe/rsrc_windows_amd64.syso`
+est un objet de ressources COFF ; `go build` lie tout `*_windows_amd64.syso`
+posé à côté du paquet principal, et l'explorateur y lit l'icône. Aucun code Go
+ne s'y réfère et aucune autre cible n'est touchée — c'est le suffixe du nom de
+fichier qui fait tout le travail, donc **ne pas le renommer**.
+
+Sur Linux, `assets/tulipe.desktop` et `assets/tulipe.png` voyagent dans
+l'archive : `Icon=tulipe` ne désigne rien si le PNG n'est pas installé.
+`Terminal=true` est indispensable, sans quoi le lanceur ouvre une fenêtre qui
+se referme aussitôt.
+
+Sur macOS il n'y a rien d'honnête à faire, et `assets/README.md` le dit plutôt
+que de laisser redécouvrir le manque : le Finder lit l'icône d'un paquet
+`.app`, que le lanceur attend graphique. Emballer un programme de terminal
+dedans revient à livrer un paquet dont le seul rôle est d'ouvrir Terminal.
+
+`assets/gen_icon.go` (`//go:build ignore`) dérive le reste du maître. Deux
+détails à ne pas défaire : le blanc des coins est retiré **par propagation
+depuis les bords**, ce qui laisse intact le blanc *à l'intérieur* du dessin —
+les pages du livre, le lettrage ; et la réduction pondère les couleurs par
+l'alpha, sans quoi les zéros d'un pixel transparent assombrissent chaque bord,
+ce qui à seize pixels représente l'essentiel de l'icône.
+
 ## Publication
 
 `.github/workflows/release.yml` compile et publie. Il se déclenche sur un tag
@@ -444,6 +553,8 @@ Trois choses à ne pas défaire :
 
 - Les vérifications (`gofmt`, `go vet`, `go test -race`) tournent **avant** la
   compilation. Une version ne se publie pas sur du code non vérifié.
+- L'archive Linux embarque aussi `tulipe.desktop` et `tulipe.png` ; le binaire
+  qu'elle contient s'appelle toujours simplement `tulipe`.
 - Le nom des archives dit `macos`, pas `darwin`. `darwin` est le `GOOS` de Go,
   exact mais illisible pour qui télécharge.
 - L'archive contient un binaire nommé simplement `tulipe`, pas le nom long de

@@ -54,9 +54,10 @@ just run it again, Tulipe resumes at the next chapter. You never pay twice for
 a chapter already translated.
 
 **No silent failure.** If a passage couldn't be translated, it stays in the
-original language, Tulipe tells you, and offers to retry it — without
-re-paying for the chapter. You won't discover at chapter 12 that an invalid
-key handed you a copy of the original.
+original language and Tulipe says so. Once the book is done it sends those
+passages back out on its own, in smaller pieces — and if any are still
+missing, it offers to try again, without re-paying for the chapter. You won't
+discover at chapter 12 that an invalid key handed you a copy of the original.
 
 ## Installation
 
@@ -75,6 +76,14 @@ you downloaded:
 
 ```bash
 sha256sum -c SHA256SUMS --ignore-missing
+```
+
+The Linux archive also holds `tulipe.desktop` and `tulipe.png`, if you want
+Tulipe in your applications menu:
+
+```bash
+install -Dm644 tulipe.png     ~/.local/share/icons/hicolor/512x512/apps/tulipe.png
+install -Dm644 tulipe.desktop ~/.local/share/applications/tulipe.desktop
 ```
 
 Or build from source — all you need is Go 1.24, nothing else:
@@ -212,13 +221,24 @@ language.
 markup. Handy for proofreading, comparing two translations, or feeding the
 text to another tool.
 
-## Retrying missed passages
+## Missed passages
 
 A model sometimes stumbles on a paragraph: an empty answer, broken markup, a
 nonsensical output. Tulipe then keeps the original text rather than inserting
 something dubious, and flags the passage.
 
-At the end of the run, it offers to retry them:
+Most of the time it is the request that failed, not the paragraph — a batch
+came back one string short, or with a sentence of chatter in front of the
+answer. So once the book is finished, Tulipe sends the flagged passages back
+out by itself: batches of at most four segments instead of forty, and a prompt
+that says the batch already came back unusable once. Same rules, same checks,
+different shape of request — and usually that is enough.
+
+It waits until the end on purpose. A service having a bad minute is generally
+over it twenty chapters later, and you get a complete book to look at either
+way. `--salvage=false`, or the **Second attempt** setting, turns it off.
+
+If anything is still missing after that, the end of the run offers to retry:
 
 ```
 ⚑ 3 passage(s) reported — the source text was kept wherever the translation
@@ -277,7 +297,7 @@ preserved, and the passage is flagged in the final report.
 | What happens | What Tulipe does |
 |---|---|
 | The model answers off-base | it retries, then splits the batch in two, down to the single paragraph |
-| A paragraph stays untranslatable | the original text is kept, and offered for retry |
+| A paragraph stays untranslatable | the original text is kept, retried in smaller pieces at the end of the book, then offered for retry |
 | The model returns broken markup | a lone ampersand is repaired; anything else keeps the source |
 | The translation contains forbidden characters | the source is kept: such a book wouldn't open |
 | Markup comes back broken | the original passage is kept and flagged |
@@ -323,10 +343,11 @@ go vet ./...
 
 No test calls the network or needs a key: everything runs offline.
 [`CLAUDE.md`](CLAUDE.md) describes the architecture and the invariants to
-respect.
+respect, and [`assets/README.md`](assets/README.md) the artwork and where the
+icon actually ends up.
 
 To publish a release: **Actions** tab → **Release** → **Run workflow**, enter
-the version number (`v0.2.0`). The workflow checks the code, builds the three
+the version number (`v0.3.0`). The workflow checks the code, builds the three
 binaries, and publishes. Pushing a `v*` tag produces the same result.
 
 ## Reference
@@ -334,6 +355,11 @@ binaries, and publishes. Pushing a `v*` tag produces the same result.
 ### What gets translated
 
 Chapter text, the table-of-contents titles, and the title of each document.
+
+Titles are optional. Turn **Translate titles** off in the settings, or pass
+`--titles=false`, and chapter headings and the table of contents stay in the
+original language while the prose is translated — which is what you want if
+the book should still match its reviews and its index.
 
 Not sent to the model: preformatted code blocks, formulas, vector graphics,
 and attribute content — so image descriptions. The book's title and the
@@ -350,9 +376,11 @@ Translated chapters are kept in your system's cache folder
 left off; the **Resume a translation** menu entry lists pending jobs, and
 `--no-resume` ignores the cache.
 
-Changing the model, language, glossary, context or style notes starts a
-fresh translation: the cache accounts for everything that changes the
-outcome. Adjusting the batch size, though, doesn't discard it.
+Changing the model, language, glossary, context, style notes or the titles
+setting starts a fresh translation: the cache accounts for everything that
+changes the outcome. Adjusting the batch size doesn't discard it, and neither
+does turning the second attempt on or off — that changes how many passages
+come back, not what any one of them says.
 
 ### Options for `translate`
 
@@ -371,6 +399,8 @@ outcome. Adjusting the batch size, though, doesn't discard it.
 --glossary-file  glossary, one "source = target" rule per line
 --style          style notes appended to the instructions
 --about          the book in one sentence, to calibrate register
+--titles         translate headings and the table of contents (default true)
+--salvage        retry the flagged passages once the book is done (default true)
 --retry          retry the passages left in the source language
 --no-resume      start fresh, without reusing the cache
 --quiet          only print the path of the produced file

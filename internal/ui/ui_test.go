@@ -14,6 +14,7 @@ import (
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/blkmlo/tulipe/internal/translate"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 func key(s string) tea.KeyMsg {
@@ -523,5 +524,26 @@ func TestTheInterfaceLanguageLeavesTheTargetLanguageAlone(t *testing.T) {
 	}
 	if got := outputPath(m.cfg, "/livres/1984.epub"); got != filepath.Join("/livres", "1984.ja.epub") {
 		t.Errorf("outputPath = %q, want the file still named after the target language", got)
+	}
+}
+
+func TestSettingsLabelsNeverTouchTheirValues(t *testing.T) {
+	// A column width chosen by eye is right in one language and one field
+	// list, and wrong the moment either changes. Every locale is checked,
+	// because "Characters per request" and "Caractères par requête" are not
+	// the same length and only one of them can be the widest.
+	defer i18n.SetLocale(i18n.DefaultLocale)
+	for _, code := range i18n.Locales {
+		i18n.SetLocale(code)
+		cfg := config.Default()
+		cfg.Language = code
+		f := newSettingsForm(cfg)
+		column := f.labelColumn()
+		for _, fd := range f.fields {
+			if w := lipgloss.Width(fd.label); w >= column {
+				t.Errorf("%s: %q is %d wide, the column is %d: the value would be glued to the label",
+					code, fd.label, w, column)
+			}
+		}
 	}
 }

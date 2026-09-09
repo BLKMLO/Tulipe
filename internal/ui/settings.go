@@ -10,6 +10,7 @@ import (
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type fieldKind int
@@ -274,6 +275,21 @@ func oneLine(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ⏎ ")), " ")
 }
 
+// labelColumn is the width of the label column, measured from the labels
+// themselves rather than written down. A number chosen by eye is right in one
+// language and one field list, and wrong the moment either changes: the widest
+// English label was exactly 22 characters, so "Characters per request4000" had
+// nowhere to put a space.
+func (f settingsForm) labelColumn() int {
+	w := 0
+	for _, fd := range f.fields {
+		if n := lipgloss.Width(fd.label); n > w {
+			w = n
+		}
+	}
+	return w + 2
+}
+
 // visible returns the indices of the fields that apply to the current provider.
 func (f settingsForm) visible() []int {
 	kind := f.cfg.Kind()
@@ -422,6 +438,7 @@ func (m Model) viewSettings() string {
 	b.WriteString(header(i18n.T("ui.settings.title")) + "\n\n")
 
 	vis := f.visible()
+	column := f.labelColumn()
 	// The list is windowed to what the terminal can actually show. Rendering
 	// every field and letting the terminal scroll away the top is what forced
 	// people to resize their window to reach the last setting.
@@ -443,7 +460,7 @@ func (m Model) viewSettings() string {
 			value = dimStyle.Render(i18n.T("ui.dash"))
 		}
 		if selected && f.editing {
-			b.WriteString(accentStyle.Render("› ") + accentStyle.Bold(true).Render(pad(fd.label, 22)) + f.input.View() + "\n")
+			b.WriteString(accentStyle.Render("› ") + accentStyle.Bold(true).Render(pad(fd.label, column)) + f.input.View() + "\n")
 			continue
 		}
 		prefix := "  "
@@ -452,7 +469,7 @@ func (m Model) viewSettings() string {
 			prefix = accentStyle.Render("› ")
 			labelSt = accentStyle.Bold(true)
 		}
-		b.WriteString(prefix + labelSt.Render(pad(fd.label, 22)) + valueStyle.Render(value) + "\n")
+		b.WriteString(prefix + labelSt.Render(pad(fd.label, column)) + valueStyle.Render(value) + "\n")
 	}
 	if end < len(vis) {
 		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-below", len(vis)-end)) + "\n")
