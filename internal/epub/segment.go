@@ -7,8 +7,10 @@ import (
 	"io"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Kind tells how a segment must be handled once translated.
@@ -96,6 +98,14 @@ func Extract(doc []byte) ([]Segment, error) {
 		segStart  int
 		segDepth  int
 		segElem   string
+		// lastEnd is where the last token seen inside the current segment
+		// ended. On a malformed document the decoder closes elements on its
+		// own, and the synthetic end tag it reports sits *after* whatever
+		// triggered the closure — far past the real content. Ending the span
+		// here instead keeps it inside what the element actually held; using
+		// the reported position would swallow the rest of the file, and
+		// replacing that span would truncate the chapter.
+		lastEnd int
 	)
 	for {
 		before := int(d.InputOffset())
@@ -107,24 +117,35 @@ func Extract(doc []byte) ([]Segment, error) {
 			return nil, fmt.Errorf("octet %d : %w", before, err)
 		}
 		after := int(d.InputOffset())
+		// A tolerant decoder invents end tags for a malformed document, and
+		// the bytes it consumed while doing so belong to whatever triggered
+		// the repair — not to the element being closed. Only a tag the source
+		// really spells out can be trusted to bound a span.
+		realClose := false
 
 		switch t := tok.(type) {
 		case xml.StartElement:
 			depth++
 			name := strings.ToLower(t.Name.Local)
 			if inSeg || skipDepth > 0 {
-				continue
+				break
 			}
 			if skipElements[name] {
 				skipDepth = depth
-				continue
+				break
 			}
 			if blockElements[name] {
 				inSeg, segStart, segDepth, segElem = true, after, depth, name
+				lastEnd = after
 			}
 		case xml.EndElement:
+			realClose = closesTag(doc[before:after], t.Name.Local)
 			if inSeg && depth == segDepth {
-				if seg, ok := makeSegment(doc, segStart, before, KindBlock, segElem); ok {
+				end := lastEnd
+				if realClose && before > end {
+					end = before
+				}
+				if seg, ok := makeSegment(doc, segStart, end, KindBlock, segElem); ok {
 					segs = append(segs, seg)
 				}
 				inSeg = false
@@ -135,10 +156,15 @@ func Extract(doc []byte) ([]Segment, error) {
 			depth--
 		case xml.CharData:
 			if inSeg || skipDepth > 0 {
-				continue
+				break
 			}
 			if seg, ok := makeSegment(doc, before, after, KindText, ""); ok {
 				segs = append(segs, seg)
+			}
+		}
+		if inSeg {
+			if _, isEnd := tok.(xml.EndElement); !isEnd || realClose {
+				lastEnd = after
 			}
 		}
 	}
@@ -146,6 +172,21 @@ func Extract(doc []byte) ([]Segment, error) {
 		return nil, fmt.Errorf("élément <%s> non refermé", segElem)
 	}
 	return segs, nil
+}
+
+// closesTag reports whether raw is the closing tag the decoder claims it is.
+// A synthetic end tag either consumed nothing, or consumed the bytes of some
+// other element's tag.
+func closesTag(raw []byte, name string) bool {
+	text := strings.TrimSpace(string(raw))
+	if !strings.HasPrefix(text, "</") || !strings.HasSuffix(text, ">") {
+		return false
+	}
+	got := strings.TrimSpace(strings.TrimSuffix(strings.TrimPrefix(text, "</"), ">"))
+	if i := strings.IndexByte(got, ':'); i >= 0 {
+		got = got[i+1:]
+	}
+	return strings.EqualFold(got, name)
 }
 
 func newDecoder(doc []byte) *xml.Decoder {
@@ -234,15 +275,99 @@ func Apply(doc []byte, segs []Segment, translations []string) ([]byte, error) {
 		switch {
 		case strings.TrimSpace(tr) == "":
 			out.WriteString(s.Source)
+		case !SafeForXML(tr):
+			// Splicing this in would produce a file no reader can open. The
+			// source is kept: the last line of defence before the book is
+			// written to disk.
+			out.WriteString(s.Source)
 		case s.Kind == KindText:
 			out.WriteString(NormaliseText(tr))
+		case WellFormed(RepairAmpersands(tr)) != nil && WellFormed(s.Source) == nil:
+			// Inline markup is spliced in raw, so a broken fragment would
+			// break the document. Callers are expected to have checked this
+			// already; Apply checks again because it is the last step before
+			// the bytes become a book.
+			out.WriteString(s.Source)
 		default:
-			out.WriteString(tr)
+			out.WriteString(RepairAmpersands(tr))
 		}
 		prev = s.End
 	}
 	out.Write(doc[prev:])
-	return out.Bytes(), nil
+
+	// The caller got its segments from Extract, so the input parsed. Whatever
+	// comes out has to parse as well — otherwise the book would not open. A
+	// source document too broken for its blocks to be replaced safely is
+	// refused here rather than written to disk.
+	result := out.Bytes()
+	if _, err := Extract(result); err != nil {
+		return nil, fmt.Errorf("le document ne serait plus lisible après réinjection : %w", err)
+	}
+	return result, nil
+}
+
+// RepairAmpersands escapes the ampersands that do not open a valid entity
+// reference, and leaves alone the ones that do.
+//
+// A bare "&" is always an error in XML, and escaping it is its only possible
+// reading — so a translation whose sole flaw is "Marks & Spencer" is worth
+// mending rather than discarding along with the whole paragraph.
+func RepairAmpersands(s string) string {
+	if !strings.ContainsRune(s, '&') {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for i := 0; i < len(s); i++ {
+		if s[i] != '&' {
+			b.WriteByte(s[i])
+			continue
+		}
+		if n := entityLength(s[i:]); n > 0 {
+			b.WriteString(s[i : i+n])
+			i += n - 1
+			continue
+		}
+		b.WriteString("&amp;")
+	}
+	return b.String()
+}
+
+// SafeForXML reports whether a string can be placed inside an XML document: it
+// must be valid UTF-8, and free of the code points XML 1.0 forbids — the
+// control characters other than tab, newline and carriage return, and the two
+// non-characters at the end of the basic plane.
+//
+// An EPUB that carries any of them is a file no reading system will open, so
+// this is checked before anything a model returns reaches a book.
+func SafeForXML(s string) bool {
+	if !utf8.ValidString(s) {
+		return false
+	}
+	for _, r := range s {
+		if !validXMLRune(r) {
+			return false
+		}
+	}
+	return true
+}
+
+// validXMLRune reports whether a code point may appear in an XML 1.0 document,
+// whether written directly or through a character reference.
+func validXMLRune(r rune) bool {
+	switch {
+	case r == '\t' || r == '\n' || r == '\r':
+		return true
+	case r < 0x20:
+		return false
+	case r >= 0xD800 && r <= 0xDFFF:
+		return false
+	case r == 0xFFFE || r == 0xFFFF:
+		return false
+	case r > 0x10FFFF:
+		return false
+	}
+	return true
 }
 
 // NormaliseText prepares a plain-text translation for insertion into an XML
@@ -288,23 +413,24 @@ func entityLength(s string) int {
 	i := 1
 	if s[i] == '#' {
 		i++
+		base := 10
 		if i < len(s) && (s[i] == 'x' || s[i] == 'X') {
 			i++
-			start := i
-			for i < len(s) && isHexDigit(s[i]) {
-				i++
-			}
-			if i == start {
-				return 0
-			}
-		} else {
-			start := i
-			for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-				i++
-			}
-			if i == start {
-				return 0
-			}
+			base = 16
+		}
+		start := i
+		for i < len(s) && isDigitFor(s[i], base) {
+			i++
+		}
+		if i == start {
+			return 0
+		}
+		// A reference is only valid if what it names is: "&#0;" reads as four
+		// harmless characters but decodes to a code point XML forbids, and
+		// would make the book unopenable.
+		value, err := strconv.ParseInt(s[start:i], base, 64)
+		if err != nil || !validXMLRune(rune(value)) {
+			return 0
 		}
 	} else {
 		start := i
@@ -321,8 +447,12 @@ func entityLength(s string) int {
 	return 0
 }
 
-func isHexDigit(c byte) bool {
-	return c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F'
+// isDigitFor reports whether c is a digit in the given base, 10 or 16.
+func isDigitFor(c byte, base int) bool {
+	if c >= '0' && c <= '9' {
+		return true
+	}
+	return base == 16 && (c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F')
 }
 
 func isNameByte(c byte) bool {
@@ -590,6 +720,13 @@ func SetDocumentLanguage(doc []byte, code string) []byte {
 
 func langAttrPattern(name string) *regexp.Regexp {
 	return regexp.MustCompile(`(?i)(\b` + regexp.QuoteMeta(name) + `\s*=\s*")([^"]*)(")`)
+}
+
+// xmlTextEscape escapes a value written as element text. Callers validate the
+// language code they pass, but a code carrying "<" or "&" would otherwise turn
+// the package document into something no reader can open.
+func xmlTextEscape(s string) string {
+	return strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;").Replace(s)
 }
 
 func xmlAttrEscape(s string) string {

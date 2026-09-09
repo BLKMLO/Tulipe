@@ -242,3 +242,52 @@ func TestSetLanguageHandlesSeveralElements(t *testing.T) {
 		t.Errorf("both language elements should carry the new code:\n%s", got)
 	}
 }
+
+func TestParseRefusesAnOversizedArchive(t *testing.T) {
+	// A zip that expands far beyond any real book must be refused rather than
+	// read into memory.
+	original := MaxUncompressedSize
+	MaxUncompressedSize = 1 << 20 // exercise the limit without building 512 MiB
+	defer func() { MaxUncompressedSize = original }()
+
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, err := zw.CreateHeader(&zip.FileHeader{Name: "huge.bin", Method: zip.Deflate})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.Write(make([]byte, 4<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if buf.Len() > 64<<10 {
+		t.Fatalf("l'archive de test fait %d octets ; elle devait rester compressée", buf.Len())
+	}
+
+	_, err = Parse(buf.Bytes())
+	if err == nil || !strings.Contains(err.Error(), "trop volumineuse") {
+		t.Fatalf("Parse = %v, want a refusal naming the size", err)
+	}
+}
+
+func TestSetLanguageEscapesWhatItWrites(t *testing.T) {
+	// The code is validated upstream, but the writer must not be the weak
+	// link: an unescaped "<" would break the package document.
+	opf := `<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf">` +
+		`<metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:language>en</dc:language></metadata></package>`
+	b := &Book{index: map[string]int{"c.opf": 0}, OPFPath: "c.opf",
+		Files: []File{{Name: "c.opf", Data: []byte(opf)}}}
+	if err := b.SetLanguage(`fr<script>&`); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := b.Read("c.opf")
+	if strings.Contains(string(got), "<script>") {
+		t.Errorf("le code a été écrit sans échappement :\n%s", got)
+	}
+	var p packageXML
+	if err := xml.Unmarshal(got, &p); err != nil {
+		t.Fatalf("le document de package ne se lit plus : %v", err)
+	}
+}

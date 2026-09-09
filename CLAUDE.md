@@ -187,6 +187,59 @@ supposition retraduirait le livre entier. `pendingOf` porte cette distinction.
 Une reprise qui échoue ne perd rien : `Book` remet le document précédent et
 note l'échec.
 
+## Ce qui ne doit jamais planter
+
+Trois campagnes tiennent cette propriété, et il faut les garder vertes :
+
+- `internal/ui/robustness_test.go` envoie **toutes** les touches à **tous** les
+  écrans, dans tous leurs états — listes vides, indices périmés, livre absent,
+  exécution absente — puis rend la vue. Il a trouvé trois plantages réels :
+  lancer une traduction sans livre, un indice de liste survivant à un
+  raccourcissement, et l'écran de progression sans exécution attachée.
+- `internal/epub/fuzz_test.go` passe des octets arbitraires dans
+  `Extract` → `Apply` → `Extract`. Six millions et demi d'exécutions sans
+  échec après les corrections décrites plus bas.
+- `TestValidateNeverPanics` combine des valeurs absurdes dans tous les champs
+  de configuration à la fois.
+
+Règle qui en découle : **une liste bornée par un indice se borne au moment de
+l'utiliser**, pas au moment de le modifier. `clampIndex` existe pour ça ; s'en
+remettre à « toutes les branches pensent à réinitialiser » est ce qui a produit
+le plantage de la liste de reprise.
+
+## Ce qu'un modèle peut renvoyer de pire
+
+`epub.Apply` est la dernière fonction avant que des octets deviennent un livre.
+Elle ne fait donc confiance à personne, y compris à `translate` :
+
+- `SafeForXML` refuse l'UTF-8 invalide et les caractères que XML interdit. Un
+  livre qui en porte un seul ne s'ouvre dans aucune liseuse.
+- `entityLength` valide **ce que désigne** une référence numérique : `&#0;`
+  ressemble à quatre caractères anodins mais décode vers un point de code
+  interdit.
+- `RepairAmpersands` échappe les esperluettes qui n'ouvrent pas d'entité
+  valide. C'est le seul défaut de balisage dont la correction soit univoque :
+  perdre un paragraphe entier pour un « Marks & Spencer » serait dommage.
+- Un fragment de bloc mal formé est refusé et la source conservée.
+- **`Apply` relit ce qu'elle produit.** Si le document ne se relit plus, elle
+  renvoie une erreur au lieu de rendre un livre cassé. C'est la seule garantie
+  qui tienne pour une source déjà mal formée, où le rééquilibrage des balises
+  est impossible à prévoir.
+
+Le fuzz a trouvé chacun de ces cas. Retirer l'un d'eux le fera réapparaître.
+
+## Documents mal formés
+
+Sur un document imparfait, le lecteur tolérant invente des balises fermantes —
+et les octets qu'il a consommés en le faisant appartiennent à ce qui a déclenché
+la réparation, pas à l'élément fermé. Se fier à la position rapportée faisait
+**avaler la fin du fichier** par le segment, et le remplacer tronquait le
+chapitre.
+
+`Extract` borne donc chaque bloc à `lastEnd`, la fin du dernier jeton vu à
+l'intérieur, et n'accepte la position rapportée que si `closesTag` confirme que
+la source contient bien la balise fermante annoncée.
+
 ## Le disjoncteur
 
 `failureCounter` compte les échecs consécutifs, **partagé par tous les
@@ -260,6 +313,19 @@ plutôt que zéro. **Ne jamais estimer, extrapoler ou convertir un décompte de
 jetons en monnaie** : les tarifs changent, un chiffre inventé est pire que pas
 de chiffre.
 
+## Saisies utilisateur
+
+`config.Validate` refuse tout ce qui ne peut pas marcher, avec un message qui
+nomme le champ. Deux familles à ne pas relâcher :
+
+- les **étiquettes de langue** (`--code`, `--from-code`) sont contraintes à une
+  forme BCP 47. Elles finissent dans les métadonnées du livre ; un `<` non
+  échappé y produirait un fichier illisible. `epub.SetLanguage` échappe en
+  plus, par principe de double protection.
+- les **champs libres** (langue, contexte, style, glossaire) sont plafonnés en
+  longueur. Ils partent dans chaque requête : une valeur absurde doit être
+  nommée ici, pas devenir une erreur obscure du service au milieu du livre.
+
 ## Clé d'API
 
 Résolue par `config.ResolveAPIKey` : `TULIPE_API_KEY`, puis la variable propre
@@ -273,6 +339,14 @@ transiter.
 `freeName` garantit qu'aucun fichier existant n'est écrasé. Une traduction est
 longue et coûteuse : perdre un résultat par écrasement est inacceptable. Ne pas
 contourner cette fonction.
+
+`checkWritable` s'exécute **avant** la traduction, pas après. Découvrir qu'un
+chemin de sortie est invalide une fois trois cents pages payées serait le pire
+moment possible.
+
+`epub.MaxUncompressedSize` borne ce qu'une archive peut occuper une fois
+décompressée. C'est une variable et non une constante pour que le test puisse
+éprouver la limite sans construire un demi-gigaoctet.
 
 ## Langue des chaînes
 

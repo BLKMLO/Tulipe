@@ -30,6 +30,10 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 	if output == "" {
 		output = outputPath(cfg, source)
 	}
+	// Prove the destination is writable now, not after paying for the book.
+	if err := checkWritable(output); err != nil {
+		return err
+	}
 
 	opts := translate.BookOptions{Options: cfg.TranslateOptions(), RetryPending: retry}
 	if cfg.Resume {

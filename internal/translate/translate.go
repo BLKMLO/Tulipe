@@ -344,10 +344,20 @@ func (t *translator) accept(lo, hi int, got []string, out []string) {
 	for i := lo; i < hi; i++ {
 		seg := t.segs[i]
 		tr := got[i-lo]
+		if seg.Kind == epub.KindBlock {
+			// A lone "&" is the one markup slip with an unambiguous fix.
+			// Mending it saves a paragraph that would otherwise be dropped
+			// whole for a "Marks & Spencer".
+			tr = epub.RepairAmpersands(tr)
+		}
 
 		switch {
 		case strings.TrimSpace(tr) == "":
 			t.keep(i, "traduction vide renvoyée par le modèle ; source conservée")
+		case !epub.SafeForXML(tr):
+			// UTF-8 invalide, ou caractères de contrôle : le livre produit
+			// serait illisible par les liseuses.
+			t.keep(i, "traduction contenant des caractères qu'un EPUB ne peut porter ; source conservée")
 		case seg.Kind == epub.KindBlock && epub.WellFormed(seg.Source) == nil && epub.WellFormed(tr) != nil:
 			t.keep(i, "balisage mal formé dans la traduction ; source conservée")
 		case seg.Kind == epub.KindText && !strings.ContainsAny(seg.Source, "<>") && strings.ContainsAny(tr, "<>"):

@@ -254,11 +254,18 @@ est conservé, et le passage est signalé dans le rapport de fin.
 |---|---|
 | Le modèle répond de travers | il réessaie, puis découpe le lot en deux, jusqu'au paragraphe isolé |
 | Un paragraphe reste intraduisible | le texte d'origine est gardé, et proposé à la reprise |
+| Le modèle renvoie du balisage abîmé | une esperluette isolée est réparée ; le reste fait garder la source |
+| La traduction contient des caractères interdits | la source est gardée : un tel livre ne s'ouvrirait pas |
 | Le balisage revient cassé | le passage d'origine est gardé et signalé |
 | Le service est surchargé | nouvelle tentative, en attendant de plus en plus longtemps |
 | Le service ne répond plus | l'appel est abandonné après un délai, puis réessayé |
 | Clé refusée, quota épuisé | arrêt immédiat, plutôt que de parcourir le livre à perte |
 | Un chapitre n'a rien donné | il est marqué en échec, jamais présenté comme traduit |
+
+Le chemin de sortie est vérifié **avant** la traduction : découvrir un dossier
+inexistant après trois cents pages serait le pire moment. Et le fichier produit
+est relu avant d'être écrit — s'il ne s'ouvrait pas, Tulipe préfère signaler le
+document plutôt que rendre un livre cassé.
 
 Les décomptes de jetons affichés sont ceux que le service communique. Quand il
 n'en communique pas, Tulipe l'écrit — il n'estime rien, et ne convertit jamais

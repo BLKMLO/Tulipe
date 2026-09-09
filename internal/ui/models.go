@@ -56,6 +56,7 @@ func (m Model) openModels() (tea.Model, tea.Cmd) {
 
 func (m Model) updateModels(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	shown := m.shownModels()
+	m.modelsIndex = clampIndex(m.modelsIndex, len(shown))
 	switch msg.String() {
 	case "esc":
 		m.screen = screenSettings
@@ -129,10 +130,11 @@ func (m Model) viewModels() string {
 	b.WriteString("\n\n")
 
 	const window = 12
-	start := clamp(m.modelsIndex-window/2, 0, max(0, len(shown)-window))
+	cursor := clampIndex(m.modelsIndex, len(shown))
+	start := clamp(cursor-window/2, 0, max(0, len(shown)-window))
 	end := min(len(shown), start+window)
 	for i := start; i < end; i++ {
-		b.WriteString(selectLine(i == m.modelsIndex, shown[i], "") + "\n")
+		b.WriteString(selectLine(i == cursor, shown[i], "") + "\n")
 	}
 	if len(shown) > end {
 		b.WriteString(dimStyle.Render(fmt.Sprintf("  … et %d autres\n", len(shown)-end)))
