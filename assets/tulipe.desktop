@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Tulipe
+GenericName=EPUB translator
+Comment=Translate an EPUB book into another language
+Comment[fr]=Traduire un livre EPUB dans une autre langue
+Exec=tulipe
+Icon=tulipe
+Terminal=true
+Categories=Office;Utility;Translation;
+Keywords=epub;book;translation;translate;
+Keywords[fr]=epub;livre;traduction;traduire;

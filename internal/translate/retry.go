@@ -39,6 +39,12 @@ func RetryPending(ctx context.Context, p llm.Provider, opts Options, meta DocMet
 	}
 
 	subset, numbers := selectSegments(srcSegs, pending)
+	if opts.KeepOriginalTitles {
+		// A pending list written before the setting was turned off can name
+		// headings. Sending them now would translate what the reader asked to
+		// keep.
+		subset, numbers = dropTitles(subset, numbers, meta.Navigation)
+	}
 	res := &DocResult{Segments: len(subset), Tail: tail}
 	if len(subset) == 0 {
 		res.Output = previous
@@ -68,6 +74,21 @@ func RetryPending(ctx context.Context, p llm.Provider, opts Options, meta DocMet
 	res.Output = out
 	res.Tail = t.tail
 	return res, ctx.Err()
+}
+
+// dropTitles removes the headings from a retry subset, keeping the two slices
+// in step.
+func dropTitles(subset []epub.Segment, numbers []int, navigation bool) ([]epub.Segment, []int) {
+	keptSegs := subset[:0:0]
+	keptNums := numbers[:0:0]
+	for i, s := range subset {
+		if s.Title || navigation {
+			continue
+		}
+		keptSegs = append(keptSegs, s)
+		keptNums = append(keptNums, numbers[i])
+	}
+	return keptSegs, keptNums
 }
 
 // selectSegments picks the segments named by pending, ignoring indices that no

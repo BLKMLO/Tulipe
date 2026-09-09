@@ -446,3 +446,41 @@ func TestAnUnknownInterfaceLanguageFallsBack(t *testing.T) {
 		t.Errorf("Language = %q, want a fallback to %q", cfg.Language, i18n.DefaultLocale)
 	}
 }
+
+func TestTitlesAreTranslatedUnlessAsked(t *testing.T) {
+	cfg := Default()
+	if !cfg.TranslateTitles {
+		t.Fatal("a first run must translate titles like everything else")
+	}
+	if cfg.TranslateOptions().KeepOriginalTitles {
+		t.Error("the two settings are opposites; translating titles means not keeping the originals")
+	}
+	if cfg.Recipe().KeepOriginalTitles {
+		t.Error("the recipe must carry the same answer as the options")
+	}
+
+	cfg.TranslateTitles = false
+	if !cfg.TranslateOptions().KeepOriginalTitles || !cfg.Recipe().KeepOriginalTitles {
+		t.Error("turning the setting off must reach both the options and the cache key")
+	}
+}
+
+func TestConfigWrittenBeforeTheTitleSettingStillTranslatesTitles(t *testing.T) {
+	// A file written by an earlier version has no "translate_titles" key.
+	// Load starts from Default(), so the absent key must leave it on rather
+	// than silently stop translating headings.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"provider":"anthropic","model":"m"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TULIPE_CONFIG", path)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.TranslateTitles {
+		t.Error("an older configuration file must keep the behaviour it had")
+	}
+}

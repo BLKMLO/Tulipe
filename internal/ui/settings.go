@@ -10,6 +10,7 @@ import (
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 type fieldKind int
@@ -142,6 +143,12 @@ func settingsFields() []field {
 			set:  func(c *config.Config, v string) error { c.SourceCode = strings.TrimSpace(v); return nil },
 		},
 		{
+			label: i18n.T("ui.field.titles"), kind: fieldBool,
+			help: i18n.T("ui.field.titles.help"),
+			get:  func(c config.Config) string { return boolLabel(c.TranslateTitles) },
+			set:  setBool(func(c *config.Config, b bool) { c.TranslateTitles = b }),
+		},
+		{
 			label: i18n.T("ui.field.chunk"), kind: fieldInt,
 			help: i18n.T("ui.field.chunk.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.ChunkChars) },
@@ -182,6 +189,12 @@ func settingsFields() []field {
 			help: i18n.T("ui.field.structured.help"),
 			get:  func(c config.Config) string { return boolLabel(c.StructuredOutput) },
 			set:  setBool(func(c *config.Config, b bool) { c.StructuredOutput = b }),
+		},
+		{
+			label: i18n.T("ui.field.salvage"), kind: fieldBool,
+			help: i18n.T("ui.field.salvage.help"),
+			get:  func(c config.Config) string { return boolLabel(c.SalvagePass) },
+			set:  setBool(func(c *config.Config, b bool) { c.SalvagePass = b }),
 		},
 		{
 			label: i18n.T("ui.field.resume"), kind: fieldBool,
@@ -260,6 +273,21 @@ func languageNames() []string {
 
 func oneLine(s string) string {
 	return strings.Join(strings.Fields(strings.ReplaceAll(s, "\n", " ⏎ ")), " ")
+}
+
+// labelColumn is the width of the label column, measured from the labels
+// themselves rather than written down. A number chosen by eye is right in one
+// language and one field list, and wrong the moment either changes: the widest
+// English label was exactly 22 characters, so "Characters per request4000" had
+// nowhere to put a space.
+func (f settingsForm) labelColumn() int {
+	w := 0
+	for _, fd := range f.fields {
+		if n := lipgloss.Width(fd.label); n > w {
+			w = n
+		}
+	}
+	return w + 2
 }
 
 // visible returns the indices of the fields that apply to the current provider.
@@ -399,14 +427,30 @@ func (m *Model) cycleChoice(fd field, step int) {
 	f.dirty = true
 }
 
+// settingsChrome is how many lines the settings screen spends on everything
+// that is not a field: the header, the help panel under the list, the unsaved
+// marker and the key hints.
+const settingsChrome = 13
+
 func (m Model) viewSettings() string {
 	f := m.settings
 	var b strings.Builder
 	b.WriteString(header(i18n.T("ui.settings.title")) + "\n\n")
 
 	vis := f.visible()
-	for i, idx := range vis {
-		fd := f.fields[idx]
+	column := f.labelColumn()
+	// The list is windowed to what the terminal can actually show. Rendering
+	// every field and letting the terminal scroll away the top is what forced
+	// people to resize their window to reach the last setting.
+	rows := m.listRows(settingsChrome)
+	start := clamp(f.index-rows/2, 0, max(0, len(vis)-rows))
+	end := min(len(vis), start+rows)
+
+	if start > 0 {
+		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-above", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		fd := f.fields[vis[i]]
 		selected := i == f.index
 		value := fd.get(f.cfg)
 		if fd.kind == fieldChoice || fd.kind == fieldBool {
@@ -416,7 +460,7 @@ func (m Model) viewSettings() string {
 			value = dimStyle.Render(i18n.T("ui.dash"))
 		}
 		if selected && f.editing {
-			b.WriteString(accentStyle.Render("› ") + accentStyle.Bold(true).Render(pad(fd.label, 22)) + f.input.View() + "\n")
+			b.WriteString(accentStyle.Render("› ") + accentStyle.Bold(true).Render(pad(fd.label, column)) + f.input.View() + "\n")
 			continue
 		}
 		prefix := "  "
@@ -425,7 +469,10 @@ func (m Model) viewSettings() string {
 			prefix = accentStyle.Render("› ")
 			labelSt = accentStyle.Bold(true)
 		}
-		b.WriteString(prefix + labelSt.Render(pad(fd.label, 22)) + valueStyle.Render(value) + "\n")
+		b.WriteString(prefix + labelSt.Render(pad(fd.label, column)) + valueStyle.Render(value) + "\n")
+	}
+	if end < len(vis) {
+		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-below", len(vis)-end)) + "\n")
 	}
 
 	if len(vis) > 0 {

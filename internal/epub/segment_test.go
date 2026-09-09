@@ -320,3 +320,47 @@ func TestApplyDoesNotDoubleEscapeTextSegments(t *testing.T) {
 		t.Fatalf("the result no longer parses: %v", err)
 	}
 }
+
+func TestExtractFlagsTitles(t *testing.T) {
+	doc := []byte(`<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml">` +
+		`<head><title>Le titre</title></head>` +
+		`<body><h1>Chapitre premier</h1><p>De la prose.</p>` +
+		`<h3>Une sous-partie</h3><li>Un élément</li></body></html>`)
+	segs, err := Extract(doc)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]bool{
+		"Le titre":         true,
+		"Chapitre premier": true,
+		"De la prose.":     false,
+		"Une sous-partie":  true,
+		"Un élément":       false,
+	}
+	if len(segs) != len(want) {
+		t.Fatalf("got %d segments, want %d", len(segs), len(want))
+	}
+	for _, s := range segs {
+		text := strings.TrimSpace(s.Source)
+		expected, known := want[text]
+		if !known {
+			t.Errorf("segment inattendu %q", text)
+			continue
+		}
+		if s.Title != expected {
+			t.Errorf("segment %q : Title = %v, want %v", text, s.Title, expected)
+		}
+	}
+}
+
+func TestTitleFlagDoesNotChangeNumbering(t *testing.T) {
+	// The flag exists precisely so that the segment list is the same whichever
+	// way the setting is turned; a resume cache must keep lining up.
+	segs, err := Extract([]byte(sampleDoc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(segs) != 5 {
+		t.Fatalf("got %d segments, want the same 5 as before the flag existed", len(segs))
+	}
+}

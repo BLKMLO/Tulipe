@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -85,6 +86,10 @@ type Recipe struct {
 	Glossary       string
 	StyleNotes     string
 	About          string
+	// KeepOriginalTitles belongs here because it changes what comes back: a
+	// chapter cached with its heading translated must not be served to a run
+	// that asked for the original titles.
+	KeepOriginalTitles bool
 }
 
 // key derives the cache identity of a book translated under this recipe.
@@ -93,6 +98,7 @@ func (r Recipe) key(fingerprint string) string {
 		fingerprint, r.Provider, r.Model, r.Effort,
 		r.TargetLanguage, r.TargetCode, r.SourceLanguage, r.SourceCode,
 		r.Glossary, r.StyleNotes, r.About,
+		strconv.FormatBool(r.KeepOriginalTitles),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])[:16]
 }

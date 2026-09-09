@@ -36,7 +36,11 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 		return err
 	}
 
-	opts := translate.BookOptions{Options: cfg.TranslateOptions(), RetryPending: retry}
+	opts := translate.BookOptions{
+		Options:      cfg.TranslateOptions(),
+		RetryPending: retry,
+		Salvage:      cfg.SalvagePass,
+	}
 	if cfg.Resume {
 		if fp, err := translate.Fingerprint(source); err == nil {
 			title := book.Title
@@ -111,7 +115,7 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 				log(i18n.T("cli.headless.notes.more"), n-20)
 				break
 			}
-			log("          %s", note)
+			log(i18n.T("cli.headless.notes.item", note))
 		}
 	}
 

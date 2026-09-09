@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 
+	"reflect"
 	"strings"
 	"testing"
 
@@ -185,33 +186,38 @@ func TestRecipeKeyChangesWithEverySemanticSetting(t *testing.T) {
 	base := Recipe{
 		Provider: "anthropic", Model: "m", Effort: "medium",
 		TargetLanguage: "français", TargetCode: "fr",
-		SourceLanguage: "english", Glossary: "a = b", StyleNotes: "sobre",
+		SourceLanguage: "english", SourceCode: "en",
+		Glossary: "a = b", StyleNotes: "sobre", About: "un roman",
+		KeepOriginalTitles: false,
 	}
 	seen := map[string]string{base.key("livre"): "base"}
 
-	variants := map[string]Recipe{}
-	for name, mutate := range map[string]func(*Recipe){
-		"provider":    func(r *Recipe) { r.Provider = "openai-compatible" },
-		"model":       func(r *Recipe) { r.Model = "autre" },
-		"effort":      func(r *Recipe) { r.Effort = "max" },
-		"langue":      func(r *Recipe) { r.TargetLanguage = "español" },
-		"code":        func(r *Recipe) { r.TargetCode = "es" },
-		"source":      func(r *Recipe) { r.SourceLanguage = "deutsch" },
-		"code source": func(r *Recipe) { r.SourceCode = "de" },
-		"glossary":    func(r *Recipe) { r.Glossary = "a = c" },
-		"style":       func(r *Recipe) { r.StyleNotes = "familier" },
-	} {
+	// Walking the struct rather than a hand-written list is the point: a
+	// setting added to Recipe and forgotten here would be exactly the silent
+	// hole this test exists to close.
+	v := reflect.ValueOf(base)
+	for i := 0; i < v.NumField(); i++ {
+		name := v.Type().Field(i).Name
 		r := base
-		mutate(&r)
-		variants[name] = r
-	}
-	for name, r := range variants {
+		f := reflect.ValueOf(&r).Elem().Field(i)
+		switch f.Kind() {
+		case reflect.String:
+			f.SetString(f.String() + "-autre")
+		case reflect.Bool:
+			f.SetBool(!f.Bool())
+		default:
+			t.Fatalf("%s has kind %s, which this test does not know how to vary", name, f.Kind())
+		}
+		if f.Interface() == v.Field(i).Interface() {
+			t.Fatalf("%s was not actually changed", name)
+		}
 		k := r.key("livre")
 		if other, clash := seen[k]; clash {
 			t.Errorf("changing %s produces the same cache key as %s: cached work would be reused wrongly", name, other)
 		}
 		seen[k] = name
 	}
+
 	// A different book must not share a key either.
 	if base.key("livre") == base.key("autre-livre") {
 		t.Error("two different books share a cache key")
@@ -317,5 +323,227 @@ func TestRetryIsSkippedWhenTheCacheCannotRemember(t *testing.T) {
 	}
 	if quiet.calls != 0 {
 		t.Errorf("%d appel(s) ; sans mémoire des passages, la reprise doit s'abstenir", quiet.calls)
+	}
+}
+
+// refusingOnce answers usably except for one segment, which it leaves empty
+// until the salvage pass asks for it again. That is the shape of the failure
+// the pass exists for: a passage a service fumbled once and gets right on a
+// second, smaller request.
+type refusingOnce struct {
+	fakeProvider
+	stubborn string
+	salvaged bool
+}
+
+func newRefusingOnce(stubborn string) *refusingOnce {
+	p := &refusingOnce{stubborn: stubborn}
+	p.answer = func(_ int, sources []string) (string, error) {
+		out := upper(sources)
+		for i, s := range sources {
+			if s == p.stubborn && !p.salvaged {
+				p.salvaged = true
+				out[i] = ""
+			}
+		}
+		return envelope(out), nil
+	}
+	return p
+}
+
+func TestSalvagePassRecoversAFlaggedPassage(t *testing.T) {
+	p := newRefusingOnce("second chapter")
+	book := testBook(t)
+	opts := bookOpts()
+	opts.Salvage = true
+
+	res, err := Book(context.Background(), p, book, opts, nil)
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+	if n := res.Pending(); n != 0 {
+		t.Errorf("Pending = %d, want the second attempt to have cleared it", n)
+	}
+	if res.Retryable() {
+		t.Error("nothing should be left to retry")
+	}
+	got, _ := book.Read("b.xhtml")
+	if !strings.Contains(string(got), "SECOND CHAPTER") {
+		t.Errorf("the salvaged translation is not in the book: %s", got)
+	}
+	// The first pass still counts: the salvage pass adds to the tally rather
+	// than replacing it.
+	if translated, total := res.Segments(); translated != total {
+		t.Errorf("translated %d of %d segments", translated, total)
+	}
+}
+
+func TestSalvagePassIsSkippedWhenTurnedOff(t *testing.T) {
+	p := newRefusingOnce("second chapter")
+	book := testBook(t)
+
+	res, err := Book(context.Background(), p, book, bookOpts(), nil)
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+	if res.Pending() != 1 {
+		t.Fatalf("Pending = %d, want the passage left flagged", res.Pending())
+	}
+	got, _ := book.Read("b.xhtml")
+	if !strings.Contains(string(got), "second chapter") {
+		t.Errorf("the source text should have been kept: %s", got)
+	}
+}
+
+func TestSalvagePassSaysItIsTheSecondWithoutRelaxingAnything(t *testing.T) {
+	var systems []string
+	refused := 0
+	p := &fakeProvider{}
+	p.answer = func(_ int, sources []string) (string, error) {
+		out := upper(sources)
+		// One passage per document comes back empty on the first pass, so
+		// each document is a partial success with something left to salvage.
+		if refused < 2 {
+			refused++
+			out[len(out)-1] = ""
+		}
+		return envelope(out), nil
+	}
+	rec := &recordingProvider{inner: p, systems: &systems}
+
+	book := testBook(t)
+	opts := bookOpts()
+	opts.Salvage = true
+	if _, err := Book(context.Background(), rec, book, opts, nil); err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+
+	var first, second string
+	for _, sp := range systems {
+		if strings.Contains(sp, "sent once already") {
+			second = sp
+		} else if first == "" {
+			first = sp
+		}
+	}
+	if first == "" {
+		t.Fatal("no first-pass prompt was recorded")
+	}
+	if second == "" {
+		t.Fatal("the salvage pass sent the same prompt as the first: it is meant to differ")
+	}
+	// Different, but not laxer: every rule of the first prompt is still there.
+	for _, rule := range []string{"exactly one string per input segment", "Reproduce every tag"} {
+		if !strings.Contains(second, rule) {
+			t.Errorf("the salvage prompt dropped a rule: %q", rule)
+		}
+	}
+}
+
+func TestSalvageOptionsOnlyEverShrinkTheBatches(t *testing.T) {
+	base := Options{MaxSegments: 40, ChunkChars: 4000, StopAfterFailures: 6}.Defaults()
+	base.failures.consecutive = 5
+
+	got := salvageOptions(base)
+	if got.MaxSegments != salvageMaxSegments || got.ChunkChars != salvageChunkChars {
+		t.Errorf("batches were not shrunk: %d segments, %d chars", got.MaxSegments, got.ChunkChars)
+	}
+	if !got.Salvage {
+		t.Error("the second pass must say so in its prompt")
+	}
+	if got.failures == base.failures || got.failures.consecutive != 0 {
+		t.Error("the guard must start from zero: the service just translated a book, so it is not the dead one the guard is for")
+	}
+	if got.failures.limit != base.failures.limit {
+		t.Error("a fresh counter, not a disabled one")
+	}
+
+	// A run already asking for smaller batches keeps its own: the point is to
+	// go down, never up.
+	small := Options{MaxSegments: 2, ChunkChars: 300, StopAfterFailures: 6}.Defaults()
+	if got := salvageOptions(small); got.MaxSegments != 2 || got.ChunkChars != 300 {
+		t.Errorf("smaller settings were overridden: %d segments, %d chars", got.MaxSegments, got.ChunkChars)
+	}
+}
+
+// recordingProvider keeps the system prompt of every request while passing the
+// call through.
+type recordingProvider struct {
+	inner   llm.Provider
+	systems *[]string
+}
+
+func (r *recordingProvider) ID() string    { return r.inner.ID() }
+func (r *recordingProvider) Model() string { return r.inner.Model() }
+func (r *recordingProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	*r.systems = append(*r.systems, req.System)
+	return r.inner.Complete(ctx, req)
+}
+
+func TestSalvagePassAsksTheFallbackWhenThereIsOne(t *testing.T) {
+	main := newRefusingOnce("second chapter")
+	// The fallback answers with a marker of its own, so the test can tell
+	// which of the two actually did the work.
+	fallback := &fakeProvider{answer: func(_ int, sources []string) (string, error) {
+		out := make([]string, len(sources))
+		for i := range sources {
+			out[i] = "de secours"
+		}
+		return envelope(out), nil
+	}}
+
+	book := testBook(t)
+	opts := bookOpts()
+	opts.Salvage = true
+	opts.Fallback = fallback
+
+	if _, err := Book(context.Background(), main, book, opts, nil); err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+	if fallback.calls == 0 {
+		t.Fatal("the fallback provider was never asked")
+	}
+	got, _ := book.Read("b.xhtml")
+	if !strings.Contains(string(got), "de secours") {
+		t.Errorf("the fallback's translation is not in the book: %s", got)
+	}
+	// The rest of the book is still the main provider's work.
+	a, _ := book.Read("a.xhtml")
+	if strings.Contains(string(a), "de secours") {
+		t.Errorf("the fallback was used beyond the flagged passage: %s", a)
+	}
+}
+
+func TestSalvageFailureKeepsTheFirstTranslation(t *testing.T) {
+	p := &fakeProvider{}
+	p.answer = func(call int, sources []string) (string, error) {
+		if call == 1 {
+			out := upper(sources)
+			out[len(out)-1] = "" // one passage refused
+			return envelope(out), nil
+		}
+		return "", errors.New("le service est tombé")
+	}
+
+	book := testBook(t)
+	opts := bookOpts()
+	opts.Salvage = true
+
+	res, err := Book(context.Background(), p, book, opts, nil)
+	if err != nil {
+		t.Fatalf("a failed second attempt must not fail the run: %v", err)
+	}
+	got, _ := book.Read("a.xhtml")
+	if !strings.Contains(string(got), "ONE") {
+		t.Errorf("the first pass's work was lost: %s", got)
+	}
+	found := false
+	for _, n := range res.Notes {
+		if strings.Contains(n.Message, "le service est tombé") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("a failed second attempt must be reported, notes = %v", res.Notes)
 	}
 }

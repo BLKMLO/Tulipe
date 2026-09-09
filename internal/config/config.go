@@ -85,6 +85,16 @@ type Config struct {
 	StyleNotes     string `json:"style_notes,omitempty"`
 	// About describes the book in one sentence, to calibrate the translation.
 	About string `json:"about,omitempty"`
+	// TranslateTitles decides whether chapter headings and the table of
+	// contents are translated along with the prose. Some readers keep the
+	// original titles so the book still matches its reviews and its index.
+	//
+	// It is stored the positive way round, which is how it is shown; the
+	// translator takes the opposite, KeepOriginalTitles, so that its own zero
+	// value keeps translating everything. Load starts from Default(), so a
+	// configuration file written before this setting existed keeps the
+	// behaviour it had.
+	TranslateTitles bool `json:"translate_titles"`
 
 	ChunkChars   int   `json:"chunk_chars"`
 	MaxSegments  int   `json:"max_segments"`
@@ -93,6 +103,12 @@ type Config struct {
 	ContextChars int   `json:"context_chars"`
 	// TimeoutSeconds caps one call to the model.
 	TimeoutSeconds int `json:"timeout_seconds"`
+
+	// SalvagePass retries, once the book is finished, the passages the first
+	// pass could not translate: smaller batches, a prompt that says as much.
+	// It is not part of Recipe — it changes how many passages come back, not
+	// what any one of them says, so turning it on must not throw away a cache.
+	SalvagePass bool `json:"salvage_pass"`
 
 	OutputDir string `json:"output_dir,omitempty"`
 	// Format is "epub" or "txt".
@@ -109,6 +125,8 @@ func Default() Config {
 		Model:            llm.DefaultAnthropicModel,
 		Effort:           "medium",
 		StructuredOutput: true,
+		TranslateTitles:  true,
+		SalvagePass:      true,
 		TargetLanguage:   target.Name,
 		TargetCode:       target.Code,
 		ChunkChars:       4000,
@@ -401,6 +419,8 @@ func (c Config) Recipe() translate.Recipe {
 		Glossary:       c.Glossary,
 		StyleNotes:     c.StyleNotes,
 		About:          c.About,
+
+		KeepOriginalTitles: !c.TranslateTitles,
 	}
 }
 
@@ -414,12 +434,14 @@ func (c Config) TranslateOptions() translate.Options {
 		StyleNotes:     c.StyleNotes,
 		About:          c.About,
 		ChunkChars:     c.ChunkChars,
-		MaxSegments:    c.MaxSegments,
-		MaxTokens:      c.MaxTokens,
-		Attempts:       c.Attempts,
-		RetryBase:      2 * time.Second,
-		ContextChars:   c.ContextChars,
-		RequestTimeout: time.Duration(c.TimeoutSeconds) * time.Second,
+
+		KeepOriginalTitles: !c.TranslateTitles,
+		MaxSegments:        c.MaxSegments,
+		MaxTokens:          c.MaxTokens,
+		Attempts:           c.Attempts,
+		RetryBase:          2 * time.Second,
+		ContextChars:       c.ContextChars,
+		RequestTimeout:     time.Duration(c.TimeoutSeconds) * time.Second,
 	}
 }
 

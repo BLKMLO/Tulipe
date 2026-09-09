@@ -516,6 +516,18 @@ func (m Model) updateResume(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// listRows is how many rows of a scrolling list fit on screen once the fixed
+// parts of the view have taken their share. It never returns less than three:
+// a window smaller than that tells the user nothing, and a terminal that
+// cramped is better served by an overflowing list than by a blank one.
+func (m Model) listRows(chrome int) int {
+	height := m.height
+	if height <= 0 {
+		height = 24 // not sized yet: assume a conventional terminal
+	}
+	return max(3, height-chrome)
+}
+
 // clampIndex keeps a selection inside a list, and returns 0 for an empty one.
 func clampIndex(i, length int) int {
 	if length <= 0 {
@@ -608,7 +620,11 @@ func (m Model) startRun() (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	opts := translate.BookOptions{Options: m.cfg.TranslateOptions(), RetryPending: m.retryOnly}
+	opts := translate.BookOptions{
+		Options:      m.cfg.TranslateOptions(),
+		RetryPending: m.retryOnly,
+		Salvage:      m.cfg.SalvagePass,
+	}
 	if m.cfg.Resume {
 		fp, err := translate.Fingerprint(m.bookPath)
 		if err == nil {

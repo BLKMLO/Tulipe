@@ -545,3 +545,130 @@ func TestDirectTranslatorFlagsPlainTextBatches(t *testing.T) {
 		}
 	}
 }
+
+func TestKeepOriginalTitlesLeavesHeadingsAlone(t *testing.T) {
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	res, err := Document(context.Background(), p,
+		Options{TargetLanguage: "français", KeepOriginalTitles: true},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	// Only the two paragraphs are counted: the <title> and the <h1> are not
+	// sent, so they are not work the run has to account for either.
+	if res.Segments != 2 || res.Translated != 2 {
+		t.Fatalf("translated %d of %d segments, want 2 of 2", res.Translated, res.Segments)
+	}
+	got := string(res.Output)
+	for _, want := range []string{"<title>t</title>", "<h1>one</h1>", "TWO <EM>THREE</EM>", "<p>FOUR</p>"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("output misses %q:\n%s", want, got)
+		}
+	}
+	if len(res.Notes) != 0 {
+		t.Errorf("skipping a title is a setting, not a problem to report: %v", res.Notes)
+	}
+}
+
+func TestKeptTitlesDoNotShiftTheOtherSegments(t *testing.T) {
+	// The second paragraph is refused, so its index lands in Pending. That
+	// index has to name the paragraph in the whole document, not its rank
+	// among the segments that happened to be sent.
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) {
+		out := upper(s)
+		for i, src := range s {
+			if src == "four" {
+				out[i] = ""
+			}
+		}
+		return envelope(out), nil
+	}}
+	res, err := Document(context.Background(), p,
+		Options{TargetLanguage: "français", KeepOriginalTitles: true, MaxSegments: 1},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	full, err := epub.Extract([]byte(doc))
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	if len(res.Pending) != 1 {
+		t.Fatalf("Pending = %v, want one entry", res.Pending)
+	}
+	if i := res.Pending[0]; i < 0 || i >= len(full) || full[i].Source != "four" {
+		t.Fatalf("Pending names segment %d, which is not the fourth paragraph", i)
+	}
+}
+
+func TestNavigationFollowsTheTitleSetting(t *testing.T) {
+	const nav = `<html xmlns="http://www.w3.org/1999/xhtml"><head><title>toc</title></head>` +
+		`<body><nav><ol><li><a href="c1.xhtml">Chapter one</a></li></ol></nav></body></html>`
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	res, err := Document(context.Background(), p,
+		Options{TargetLanguage: "français", KeepOriginalTitles: true},
+		DocMeta{Navigation: true}, "nav.xhtml", []byte(nav), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Segments != 0 {
+		t.Fatalf("Segments = %d, want the table of contents left whole", res.Segments)
+	}
+	if p.calls != 0 {
+		t.Errorf("%d call(s) made for a document that had nothing to send", p.calls)
+	}
+	if string(res.Output) != nav {
+		t.Errorf("output = %s", res.Output)
+	}
+}
+
+func TestRetryPendingHonoursTheTitleSetting(t *testing.T) {
+	// A pending list written while titles were being translated still names
+	// the heading. Turning the setting off has to hold on the retry too.
+	source := []byte(doc)
+	full, err := epub.Extract(source)
+	if err != nil {
+		t.Fatalf("Extract: %v", err)
+	}
+	var heading, prose int
+	for i, s := range full {
+		switch s.Source {
+		case "one":
+			heading = i
+		case "four":
+			prose = i
+		}
+	}
+
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	res, err := RetryPending(context.Background(), p,
+		Options{TargetLanguage: "français", KeepOriginalTitles: true},
+		DocMeta{}, "c1.xhtml", source, source, []int{heading, prose}, "", nil)
+	if err != nil {
+		t.Fatalf("RetryPending: %v", err)
+	}
+	if res.Segments != 1 {
+		t.Fatalf("Segments = %d, want the heading dropped and the paragraph kept", res.Segments)
+	}
+	got := string(res.Output)
+	if !strings.Contains(got, "<h1>one</h1>") || !strings.Contains(got, "<p>FOUR</p>") {
+		t.Errorf("output = %s", got)
+	}
+}
+
+func TestADocumentLevelNoteDoesNotClaimToBeAboutTheFirstParagraph(t *testing.T) {
+	// Segment zero is a real paragraph, so a note about the whole document
+	// cannot leave the field unset and hope for the best.
+	whole := docNote("ch1.xhtml", "le cache a refusé le document")
+	if strings.Contains(whole.String(), "0") {
+		t.Errorf("a document-level note names a segment: %s", whole)
+	}
+	if !strings.Contains(whole.String(), "ch1.xhtml") || !strings.Contains(whole.String(), "refusé") {
+		t.Errorf("note = %s", whole)
+	}
+
+	first := Note{Document: "ch1.xhtml", Segment: 0, Message: "vide"}
+	if !strings.Contains(first.String(), "0") {
+		t.Errorf("a note about the first paragraph must still name it: %s", first)
+	}
+}
