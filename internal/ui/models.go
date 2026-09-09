@@ -118,12 +118,12 @@ func (m Model) viewModels() string {
 
 	if m.loading {
 		b.WriteString(m.spin.View() + dimStyle.Render(i18n.T("ui.models.querying")))
-		b.WriteString("\n\n" + help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
+		b.WriteString("\n\n" + m.help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 		return b.String()
 	}
 	if len(m.models) == 0 {
 		b.WriteString(dimStyle.Render(i18n.T("ui.models.empty")))
-		b.WriteString("\n\n" + help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
+		b.WriteString("\n\n" + m.help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 		return b.String()
 	}
 
@@ -134,10 +134,8 @@ func (m Model) viewModels() string {
 	}
 	b.WriteString("\n\n")
 
-	window := m.listRows(modelsChrome)
 	cursor := clampIndex(m.modelsIndex, len(shown))
-	start := clamp(cursor-window/2, 0, max(0, len(shown)-window))
-	end := min(len(shown), start+window)
+	start, end := window(cursor, len(shown), m.listRows(modelsChrome))
 	if start > 0 {
 		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-above", start)) + "\n")
 	}
@@ -151,6 +149,6 @@ func (m Model) viewModels() string {
 		b.WriteString(dimStyle.Render(i18n.T("ui.models.no-match")))
 	}
 
-	b.WriteString("\n" + help(i18n.T("ui.key.up-down"), i18n.T("ui.act.choose"), i18n.T("ui.key.enter"), i18n.T("ui.act.keep"), i18n.T("ui.key.type"), i18n.T("ui.act.filter"), i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
+	b.WriteString("\n" + m.help(i18n.T("ui.key.up-down"), i18n.T("ui.act.choose"), i18n.T("ui.key.enter"), i18n.T("ui.act.keep"), i18n.T("ui.key.type"), i18n.T("ui.act.filter"), i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 	return b.String()
 }

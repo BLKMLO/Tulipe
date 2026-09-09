@@ -72,8 +72,15 @@ func lbl(key string, width int) string {
 	return labelStyle.Render(pad(i18n.T(key), width))
 }
 
-// help renders the key hints at the bottom of a screen.
-func help(pairs ...string) string {
+// help renders the key hints at the bottom of a screen, wrapped to the
+// terminal.
+//
+// Wrapping rather than letting the line run: the hints are cut to the screen
+// width like everything else, and the key that would fall off the end is
+// "s save" — a reader on a narrow terminal could no longer find out how to
+// keep their settings. The row a wrap costs is measured with the rest of the
+// chrome, so it comes out of the list above rather than off the bottom.
+func (m Model) help(pairs ...string) string {
 	var out string
 	for i := 0; i+1 < len(pairs); i += 2 {
 		if i > 0 {
@@ -81,7 +88,10 @@ func help(pairs ...string) string {
 		}
 		out += accentStyle.Render(pairs[i]) + helpStyle.Render(" "+pairs[i+1])
 	}
-	return out
+	if m.width <= 0 || lipgloss.Width(out) <= m.width {
+		return out
+	}
+	return lipgloss.NewStyle().Width(m.width).Render(out)
 }
 
 // selectLine renders one line of a vertical selection list.

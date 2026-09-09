@@ -520,12 +520,56 @@ func (m Model) updateResume(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // parts of the view have taken their share. It never returns less than three:
 // a window smaller than that tells the user nothing, and a terminal that
 // cramped is better served by an overflowing list than by a blank one.
-func (m Model) listRows(chrome int) int {
-	height := m.height
-	if height <= 0 {
-		height = 24 // not sized yet: assume a conventional terminal
+// minListRows is the fewest rows a scrolling list is ever given. Below this a
+// list stops being one: you cannot tell where you are in it.
+const minListRows = 3
+
+// window picks the slice of a list to show, centred on the cursor, inside a
+// budget of rows.
+//
+// The budget covers the whole block, "n more above" and "n more below"
+// included: those markers are rows like any other, and leaving them out of the
+// count is what pushes the last line of a screen out of sight. Both are
+// reserved as soon as the list does not fit, even when only one will be drawn,
+// so the list keeps its height as the cursor travels rather than shifting
+// under it.
+//
+// On a terminal too short even for minListRows the budget wins: one row of a
+// list is poor, but a screen whose bottom has scrolled away is worse, and the
+// caller has already dropped what it could to get here.
+func window(cursor, total, budget int) (start, end int) {
+	rows := budget
+	if total > rows {
+		rows = budget - 2
 	}
-	return max(3, height-chrome)
+	rows = max(1, rows)
+	start = clamp(cursor-rows/2, 0, max(0, total-rows))
+	return start, min(total, start+rows)
+}
+
+func (m Model) listRows(chrome int) int {
+	return max(minListRows, m.rows()-chrome)
+}
+
+// rows is the terminal's height, or a conventional one before the first size
+// message arrives.
+func (m Model) rows() int {
+	if m.height <= 0 {
+		return 24
+	}
+	return m.height
+}
+
+// panelWidth is how wide the boxed help text under a list may be. It follows
+// the terminal rather than a floor of its own: a floor wider than the screen
+// is a box that hangs off the right edge, and the lines it wraps to are rows
+// the screen above it was counting on.
+func (m Model) panelWidth() int {
+	width := m.width
+	if width <= 0 {
+		width = 80
+	}
+	return clamp(width-8, 16, 96)
 }
 
 // clampIndex keeps a selection inside a list, and returns 0 for an empty one.

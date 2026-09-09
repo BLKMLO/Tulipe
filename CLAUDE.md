@@ -199,7 +199,11 @@ Dans `internal/translate` :
 - Une chaîne de traduction vide veut dire « garder la source » : c'est le
   contrat entre `translateRange` et `epub.Apply`.
 - Tout rejet produit une `Note`. **Rien n'est jamais écarté en silence** ; le
-  rapport de fin les affiche toutes. Une note qui parle du document entier
+  rapport de fin les affiche toutes. Une note produite par la seconde tentative
+  le dit (`translator.note` la préfixe quand `opts.Salvage`) : sans cela le même
+  passage revenait deux fois avec la même phrase, et le rapport comptait six
+  problèmes là où trois paragraphes sont bloqués — en contradiction avec la
+  ligne « en attente » juste au-dessus. Une note qui parle du document entier
   (« pas mis en cache », « seconde tentative échouée ») se construit avec
   `docNote`, qui pose `Segment` à -1 : zéro est un vrai numéro de paragraphe,
   et laisser le champ à sa valeur nulle faisait désigner le premier.
@@ -248,13 +252,44 @@ Trois campagnes tiennent cette propriété, et il faut les garder vertes :
 - `TestValidateNeverPanics` combine des valeurs absurdes dans tous les champs
   de configuration à la fois.
 
-Une liste plus longue que le terminal se fenêtre au lieu de déborder :
-`Model.listRows(chrome)` dit combien de lignes restent une fois les parties
-fixes de la vue servies, jamais moins de trois, et l'écran centre la fenêtre
-sur la sélection en annonçant ce qui dépasse (`ui.list.more-above`,
-`ui.list.more-below`). Chaque écran déclare sa propre constante de chrome
-(`settingsChrome`, `modelsChrome`) : c'est ce qui doit être mis à jour quand on
-ajoute une ligne fixe à une vue, sinon le bas se fait manger.
+## Tenir dans le terminal
+
+Trois règles, dans cet ordre — chacune dépend de la précédente.
+
+**1. Rien ne dépasse à droite.** `Model.fitWidth` coupe chaque ligne de la vue
+finale à la largeur du terminal, une fois, dans `View`. Une ligne trop longue
+n'est pas seulement laide : le terminal la replie, et les lignes qu'elle prend
+sont celles sur lesquelles l'écran comptait. Un chemin de fichier ou un état de
+clé d'API poussait ainsi le bas de l'écran hors de vue. La coupe passe par
+`ansi.Truncate`, qui connaît les séquences d'échappement : une ligne coupée
+garde ses couleurs et n'en laisse pas fuir la moitié sur la suivante.
+C'est cette coupe qui rend vraie la hauteur mesurée à l'étape suivante.
+
+**2. La hauteur se mesure, elle ne se suppose pas.** `viewSettings` construit
+son en-tête et son pied, mesure leur hauteur réelle avec `lipgloss.Height`, et
+donne à la liste ce qui reste. Une constante était juste pour une aide, une
+largeur et une langue, et fausse pour la suivante ajoutée : c'est ce qui a fait
+déborder l'écran des réglages dès qu'un texte d'aide un peu long a été écrit.
+Quand il n'y a pas la place, on retire dans cet ordre : d'abord l'aide du champ
+sélectionné (`settingsFoot(false)`), ensuite les marqueurs, jamais la liste.
+Même principe sur l'écran du livre, où le nombre de chapitres listés suit le
+terminal au lieu d'un « dix » écrit en dur.
+
+**3. Une fenêtre paie ses propres marqueurs.** `window(cursor, total, budget)`
+rend la tranche à afficher, marqueurs compris dans le budget : « n au-dessus »
+et « n en dessous » sont des lignes comme les autres. Les deux sont réservées
+dès que la liste ne tient pas, même si une seule sera dessinée, pour que la
+liste garde sa hauteur quand le curseur se déplace au lieu de bouger sous lui.
+
+`TestNoScreenRunsPastTheRightEdge`, `TestTheScrollingScreensFitTheTerminal` et
+`TestWindowCountsItsOwnMarkers` verrouillent les trois, dans les deux langues et
+de 40×10 à 200×50. Un panneau à contenu fixe — celui de l'écran du livre — reste
+plus haut qu'un terminal de dix lignes : la coupe à droite tient toujours, la
+hauteur non, et c'est assumé.
+
+`Model.help` replie les rappels de touches plutôt que de les laisser filer :
+coupée, la ligne perdait « s enregistrer », donc le moyen d'enregistrer.
+La ligne qu'un repli coûte est mesurée avec le reste du pied.
 
 Règle qui en découle : **une liste bornée par un indice se borne au moment de
 l'utiliser**, pas au moment de le modifier. `clampIndex` existe pour ça ; s'en
@@ -402,6 +437,12 @@ Deux choses à ne pas défaire dans `prompt.go` :
   librement » se substituerait aux règles qui protègent le fichier.
 
 ## Chiffres affichés
+
+Zéro requête a deux causes, et l'interface ne doit pas confondre : tout venait
+du cache, ou il n'y avait rien à traduire (un livre entièrement fait de titres
+avec l'option désactivée, par exemple). `Result.Cached()` tranche ;
+`requestsLine` et `requestsPlain` s'en servent. Annoncer un cache qui n'a pas
+servi raconte au lecteur d'où vient son livre, et se trompe.
 
 `llm.Usage` porte un champ `Reported`. Un fournisseur qui ne renvoie pas de
 décompte laisse `Reported` à faux, et l'interface écrit « non communiqués »

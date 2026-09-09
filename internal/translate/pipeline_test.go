@@ -547,3 +547,97 @@ func TestSalvageFailureKeepsTheFirstTranslation(t *testing.T) {
 		t.Errorf("a failed second attempt must be reported, notes = %v", res.Notes)
 	}
 }
+
+func TestASecondAttemptDoesNotDoubleTheReport(t *testing.T) {
+	// The passage never comes back, so both passes report it. Two identical
+	// sentences read as two stuck paragraphs, which contradicts the pending
+	// count the reader sees on the line above.
+	p := &fakeProvider{answer: func(_ int, sources []string) (string, error) {
+		out := upper(sources)
+		for i, s := range sources {
+			if s == "second chapter" {
+				out[i] = ""
+			}
+		}
+		return envelope(out), nil
+	}}
+	book := testBook(t)
+	opts := bookOpts()
+	opts.Salvage = true
+
+	res, err := Book(context.Background(), p, book, opts, nil)
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+	if res.Pending() != 1 {
+		t.Fatalf("Pending = %d, want the passage still flagged", res.Pending())
+	}
+
+	var first, second int
+	for _, n := range res.Notes {
+		switch {
+		case strings.Contains(n.Message, "second attempt"):
+			second++
+		default:
+			first++
+		}
+	}
+	if first != 1 {
+		t.Errorf("%d note(s) from the first pass, want 1: %v", first, res.Notes)
+	}
+	if second != 1 {
+		t.Errorf("%d note(s) marked as the second attempt, want 1: %v", second, res.Notes)
+	}
+}
+
+func TestCachedCountsWhatCameFromTheCache(t *testing.T) {
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	cache := newMemCache()
+	opts := bookOpts()
+	opts.Cache = cache
+
+	book := testBook(t)
+	res, err := Book(context.Background(), p, book, opts, nil)
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+	if n := res.Cached(); n != 0 {
+		t.Errorf("a first run cached %d document(s)", n)
+	}
+
+	again, err := Book(context.Background(), p, testBook(t), opts, nil)
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+	if n := again.Cached(); n != len(again.Documents) {
+		t.Errorf("Cached() = %d of %d documents on a re-run", n, len(again.Documents))
+	}
+	if again.Attempted != 0 {
+		t.Errorf("a fully cached run made %d call(s)", again.Attempted)
+	}
+}
+
+func TestNothingToTranslateIsNotTheSameAsFullyCached(t *testing.T) {
+	// A book whose every segment is a title, with titles turned off, makes no
+	// request at all — and was never cached. Reporting it as "everything came
+	// from the resume cache" tells the reader their book came from somewhere
+	// it did not.
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	opts := bookOpts()
+	opts.KeepOriginalTitles = true
+	opts.Cache = newMemCache()
+
+	book := testBook(t)
+	res, err := Book(context.Background(), p, book, opts, nil)
+	if err != nil {
+		t.Fatalf("Book: %v", err)
+	}
+	if p.calls != 1 {
+		// The two chapters hold one heading and one paragraph each; only the
+		// paragraphs travel.
+		t.Logf("%d call(s) made", p.calls)
+	}
+	if res.Cached() != 0 {
+		t.Errorf("Cached() = %d, want none: nothing was in the cache", res.Cached())
+	}
+}

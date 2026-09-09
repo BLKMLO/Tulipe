@@ -105,7 +105,7 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 	if p := res.Pending(); p > 0 {
 		log(i18n.T("cli.headless.pending"), p)
 	}
-	log(i18n.T("cli.headless.requests"), requestsPlain(res.Requests, res.Attempted))
+	log(i18n.T("cli.headless.requests"), requestsPlain(res.Requests, res.Attempted, res.Cached()))
 	log(i18n.T("cli.headless.tokens"), usagePlain(res.Usage, res.Attempted))
 	log(i18n.T("cli.headless.duration"), res.Duration.Round(time.Second))
 	if n := len(res.Notes); n > 0 {
@@ -146,8 +146,11 @@ func segmentsPlain(translated, total int) string {
 	return i18n.T("ui.segments.count", translated, total)
 }
 
-func requestsPlain(requests, attempted int) string {
+func requestsPlain(requests, attempted, cached int) string {
 	if attempted == 0 {
+		if cached == 0 {
+			return i18n.T("ui.requests.nothing-to-do")
+		}
 		return i18n.T("ui.requests.none")
 	}
 	if attempted == requests {

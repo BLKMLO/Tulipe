@@ -8,6 +8,8 @@ import (
 	"github.com/blkmlo/tulipe/internal/i18n"
 	"github.com/blkmlo/tulipe/internal/llm"
 	"github.com/blkmlo/tulipe/internal/translate"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // View implements tea.Model.
@@ -43,7 +45,33 @@ func (m Model) View() string {
 		}
 		out.WriteString("\n\n" + style.Render("• "+truncate(m.notice, 400)))
 	}
-	return out.String() + "\n"
+	return m.fitWidth(out.String()) + "\n"
+}
+
+// fitWidth cuts every line of a finished view down to the terminal's width.
+//
+// It is applied once, here, rather than at each of the thirty places a value
+// is printed. A line that is too long does not merely look wrong: the terminal
+// wraps it, and the extra rows are ones the screens counted on having, so a
+// long file path or an API-key status pushes the bottom of the screen out of
+// sight. Cutting first is what makes a view's measured height its real height.
+//
+// The cut is escape-aware, so a truncated line keeps its colours and does not
+// leak a half-written sequence into the next one.
+func (m Model) fitWidth(view string) string {
+	width := m.width
+	if width <= 0 {
+		// No size reported yet: leave the view alone rather than guess at a
+		// width and cut something that would have fitted.
+		return view
+	}
+	lines := strings.Split(view, "\n")
+	for i, line := range lines {
+		if ansi.StringWidth(line) > width {
+			lines[i] = ansi.Truncate(line, width, "…")
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 func (m Model) viewMenu() string {
@@ -65,7 +93,7 @@ func (m Model) viewMenu() string {
 	if m.loading {
 		b.WriteString("\n\n" + m.spin.View() + dimStyle.Render(" "+i18n.T("ui.working")))
 	}
-	b.WriteString("\n\n" + help(
+	b.WriteString("\n\n" + m.help(
 		i18n.T("ui.key.up-down"), i18n.T("ui.act.navigate"),
 		i18n.T("ui.key.enter"), i18n.T("ui.act.choose"),
 		"q", i18n.T("ui.act.quit")))
@@ -80,7 +108,7 @@ func (m Model) viewPicker() string {
 	if m.loading {
 		b.WriteString("\n" + m.spin.View() + dimStyle.Render(" "+i18n.T("ui.picker.loading")))
 	}
-	b.WriteString("\n" + help(
+	b.WriteString("\n" + m.help(
 		i18n.T("ui.key.up-down"), i18n.T("ui.act.browse"),
 		i18n.T("ui.key.enter"), i18n.T("ui.act.open"),
 		i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
@@ -114,24 +142,40 @@ func (m Model) viewBook() string {
 		rows = append(rows, lbl("ui.book.pending", bookLabel)+warnStyle.Render(i18n.T("ui.book.pending.value", m.pending)))
 	}
 	b.WriteString(panelStyle.Render(strings.Join(rows, "\n")))
+	head := b.String()
 
-	b.WriteString("\n\n" + labelStyle.Render(i18n.T("ui.book.chapters")) + "\n")
-	limit := 10
-	for i, ch := range m.book.Chapters {
-		if i == limit {
-			b.WriteString(dimStyle.Render(i18n.T("ui.book.and-more", len(m.book.Chapters)-limit)))
-			break
-		}
-		b.WriteString(dimStyle.Render(fmt.Sprintf("  %2d. ", i+1)) + valueStyle.Render(truncate(ch.Title, 60)) + "\n")
-	}
-
-	b.WriteString("\n" + dimStyle.Render(i18n.T("ui.book.explanation", m.cfg.ChunkChars)))
 	keys := []string{i18n.T("ui.key.enter"), i18n.T("ui.act.translate")}
 	if m.pending > 0 {
 		keys = append(keys, "p", i18n.T("ui.act.retry-pending"))
 	}
 	keys = append(keys, "r", i18n.T("ui.act.clear-cache"), i18n.T("ui.key.esc"), i18n.T("ui.act.back"))
-	b.WriteString("\n\n" + help(keys...))
+	foot := "\n" + dimStyle.Render(i18n.T("ui.book.explanation", m.cfg.ChunkChars)) +
+		"\n\n" + m.help(keys...)
+
+	// How many chapters are listed follows the terminal rather than a fixed
+	// ten: ten was too many on a split pane, where the list pushed the keys
+	// off the bottom, and needlessly few on a tall one. The label and the
+	// blank line above it cost two rows, so they are part of the same budget:
+	// on a terminal with no room for a single chapter the whole block goes,
+	// rather than half of it hanging past the edge.
+	const chapterHeader = 2
+	limit := m.rows() - lipgloss.Height(head) - lipgloss.Height(foot) - chapterHeader
+	if len(m.book.Chapters) > limit {
+		limit-- // the "and N more" line is a row too
+	}
+
+	if limit >= 1 {
+		b.WriteString("\n\n" + labelStyle.Render(i18n.T("ui.book.chapters")) + "\n")
+		limit = min(limit, len(m.book.Chapters))
+		for i, ch := range m.book.Chapters {
+			if i == limit {
+				b.WriteString(dimStyle.Render(i18n.T("ui.book.and-more", len(m.book.Chapters)-limit)))
+				break
+			}
+			b.WriteString(dimStyle.Render(fmt.Sprintf("  %2d. ", i+1)) + valueStyle.Render(truncate(ch.Title, 60)) + "\n")
+		}
+	}
+	b.WriteString(foot)
 	return b.String()
 }
 
@@ -141,7 +185,7 @@ func (m Model) viewRun() string {
 
 	if m.run == nil {
 		b.WriteString(dimStyle.Render(i18n.T("ui.run.none")))
-		return b.String() + "\n\n" + help(i18n.T("ui.key.esc"), i18n.T("ui.act.back"))
+		return b.String() + "\n\n" + m.help(i18n.T("ui.key.esc"), i18n.T("ui.act.back"))
 	}
 
 	docs := m.run.progress.Documents
@@ -177,7 +221,7 @@ func (m Model) viewRun() string {
 		}
 	}
 
-	b.WriteString("\n" + help(i18n.T("ui.key.esc"), i18n.T("ui.act.cancel-run")))
+	b.WriteString("\n" + m.help(i18n.T("ui.key.esc"), i18n.T("ui.act.cancel-run")))
 	return b.String()
 }
 
@@ -250,7 +294,7 @@ func (m Model) viewReport() string {
 	rows := []string{
 		lbl("ui.report.documents", w) + valueStyle.Render(i18n.T("ui.report.documents.value", done, cached, failed)),
 		lbl("ui.report.segments", w) + valueStyle.Render(segmentsLine(translated, totalSegments)),
-		lbl("ui.report.requests", w) + valueStyle.Render(requestsLine(m.result.Requests, m.result.Attempted)),
+		lbl("ui.report.requests", w) + valueStyle.Render(requestsLine(m.result.Requests, m.result.Attempted, m.result.Cached())),
 		lbl("ui.report.tokens", w) + valueStyle.Render(usageLine(m.result.Usage, m.result.Attempted)),
 		lbl("ui.report.duration", w) + valueStyle.Render(m.result.Duration.Round(time.Second).String()),
 	}
@@ -284,11 +328,11 @@ func (m Model) viewReport() string {
 	}
 
 	if m.result.Retryable() {
-		b.WriteString("\n\n" + help(
+		b.WriteString("\n\n" + m.help(
 			"p", i18n.T("ui.act.retry-untranslated"),
 			i18n.T("ui.key.enter"), i18n.T("ui.act.back-to-menu")))
 	} else {
-		b.WriteString("\n\n" + help(i18n.T("ui.key.enter"), i18n.T("ui.act.back-to-menu")))
+		b.WriteString("\n\n" + m.help(i18n.T("ui.key.enter"), i18n.T("ui.act.back-to-menu")))
 	}
 	return b.String()
 }
@@ -298,7 +342,7 @@ func (m Model) viewResume() string {
 	b.WriteString(header(i18n.T("ui.resume.title")) + "\n\n")
 	if len(m.runs) == 0 {
 		b.WriteString(dimStyle.Render(i18n.T("ui.resume.empty")))
-		b.WriteString("\n\n" + help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
+		b.WriteString("\n\n" + m.help(i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
 		return b.String()
 	}
 	for i, r := range m.runs {
@@ -313,7 +357,7 @@ func (m Model) viewResume() string {
 		detail += " · " + r.UpdatedAt.Format("2006-01-02 15:04")
 		b.WriteString(selectLine(i == m.runsIndex, truncate(label, 50), detail) + "\n")
 	}
-	b.WriteString("\n" + help(
+	b.WriteString("\n" + m.help(
 		i18n.T("ui.key.enter"), i18n.T("ui.act.resume"),
 		"d", i18n.T("ui.act.delete"),
 		i18n.T("ui.key.esc"), i18n.T("ui.act.back")))
@@ -343,8 +387,16 @@ func segmentsLine(translated, total int) string {
 	return i18n.T("ui.segments.count", translated, total)
 }
 
-func requestsLine(requests, attempted int) string {
+// requestsLine explains a run's request count, and in particular a count of
+// zero. Zero used to be reported as "everything came from the resume cache",
+// which is only one of its causes: a book whose every document is a title, with
+// titles turned off, makes no request either and was never cached. Saying so
+// wrongly tells the reader their book came from somewhere it did not.
+func requestsLine(requests, attempted, cached int) string {
 	if attempted == 0 {
+		if cached == 0 {
+			return i18n.T("ui.requests.nothing-to-do")
+		}
 		return i18n.T("ui.requests.none")
 	}
 	if attempted == requests {

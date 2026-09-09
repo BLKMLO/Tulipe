@@ -89,6 +89,18 @@ func (r *Result) Retryable() bool {
 	return len(r.Failed()) > 0 || r.Pending() > 0
 }
 
+// Cached counts the documents this run took from the resume cache rather than
+// translating again.
+func (r *Result) Cached() int {
+	n := 0
+	for _, d := range r.Documents {
+		if d.Status == StatusCached {
+			n++
+		}
+	}
+	return n
+}
+
 // Failed lists the documents that could not be translated.
 func (r *Result) Failed() []DocState {
 	var out []DocState
