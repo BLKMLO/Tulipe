@@ -396,7 +396,7 @@ HTTP arrive, exploitable ou non — les jetons sont dépensés dans les deux cas
 
 `translate.Recipe` liste **tout ce qui change le résultat** : fournisseur,
 modèle, effort, langues (noms et codes), glossaire, consignes de style,
-phrase de contexte. La langue de l'interface n'y est pas, et ne doit pas y
+phrase de contexte, traduction des titres, continuité. La langue de l'interface n'y est pas, et ne doit pas y
 entrer : elle ne change pas un mot de ce que le modèle renvoie. C'est ce qui donne la
 clé du cache. Ajouter un réglage qui influence la traduction sans l'ajouter à
 `Recipe` fait resservir en silence une traduction obtenue sous d'autres
@@ -409,7 +409,45 @@ apprendre chaque nouvelle sorte de champ — il échoue franchement sur un type
 qu'il ne sait pas faire varier.
 
 Le découpage (`ChunkChars`, `MaxSegments`) est délibérément hors de `Recipe` :
-le régler ne doit pas jeter le cache.
+le régler ne doit pas jeter le cache. C'est la seule exception, et elle est
+pragmatique — le découpage est une molette mécanique, pas un réglage de rendu.
+La continuité, elle, en fait partie : elle décide de ce que le modèle voit du
+passage précédent. Elle en était absente, et baisser la continuité puis
+relancer ressortait le livre entier du cache, traduit sous l'ancien réglage.
+
+## Continuité : zéro ne veut pas dire la même chose des deux côtés
+
+`Config.ContextChars` porte la réponse du lecteur, où **zéro veut dire
+« aucune »**. `Options.ContextChars` garde la convention de tous les autres
+entiers du fichier, où **zéro veut dire « non renseigné »** et où `Defaults`
+met 400. Le négatif est la façon dont `Options` écrit « aucune » ;
+`config.continuity` fait la conversion. Même inversion assumée que
+`KeepOriginalTitles`, pour la même raison : la valeur nulle d'une structure
+doit rester le comportement d'avant.
+
+Piège qui a coûté une correction incomplète : **`Defaults` doit être
+idempotent.** `Book` l'applique pour le run, puis `Document` l'applique à
+nouveau sur sa copie. Une première version réparait `<0 → 0` puis `0 → 400` :
+le premier passage transformait « aucune » en zéro, le second remettait 400, et
+la continuité revenait alors qu'on l'avait coupée. Le test unitaire passait, le
+livre non — `TestDefaultsCanBeAppliedTwice` verrouille la propriété pour tous
+les champs, pas seulement celui-là.
+
+## Ne traduire que certains chapitres
+
+`translate.SelectDocuments(names, "1-3,7")` rend l'ensemble attendu par
+`BookOptions.Only`. Les numéros sont des positions dans
+`book.TranslatableDocuments()`, c'est-à-dire **l'ordre dans lequel le rapport
+les numérote** : c'est ce qui permet de répondre à « chapitre 4 en échec » par
+`--chapters 4` plutôt que par un chemin d'archive que personne n'a vu.
+
+Une spécification vide rend `nil`, pas une carte contenant tout : `Only` lit
+`nil` comme « aucune restriction ». Un numéro hors du livre, un intervalle à
+l'envers ou une syntaxe illisible sont des **erreurs**, jamais des silences —
+une coquille qui traduit le mauvais chapitre, ou aucun, se paie une heure plus
+tard.
+
+Le TUI ne l'expose pas encore : il faudrait un écran de sélection.
 
 ## Le prompt
 

@@ -66,6 +66,11 @@ type Options struct {
 	RequestTimeout time.Duration
 	// ContextChars is how much of the previous translation is shown to the
 	// model for continuity of tone and terminology.
+	//
+	// Zero means "not set", and Defaults fills in the usual amount. A negative
+	// value means "none at all", which is a real answer and has to be
+	// distinguishable from an unset field — config.Config carries the reader's
+	// choice, where zero does mean none, and converts.
 	ContextChars int
 	// StopAfterFailures aborts the run once this many requests in a row have
 	// failed without a single success, so a dead or misconfigured service
@@ -134,10 +139,11 @@ func (o Options) Defaults() Options {
 	if o.RetryBase <= 0 {
 		o.RetryBase = 2 * time.Second
 	}
-	if o.ContextChars < 0 {
-		o.ContextChars = 0
-	}
 	if o.ContextChars == 0 {
+		// Zero is "not set". A negative value is "none at all" and is left
+		// alone: Defaults is applied by Book and again by Document, so any
+		// repair here happens twice. Turning none into zero and zero into the
+		// default put four hundred characters back on the second pass.
 		o.ContextChars = 400
 	}
 	if o.RequestTimeout == 0 {
@@ -463,7 +469,7 @@ func (t *translator) accept(lo, hi int, got []string, out []string) {
 		}
 		t.done++
 	}
-	if s := strings.TrimSpace(plain.String()); s != "" {
+	if s := strings.TrimSpace(plain.String()); s != "" && t.opts.ContextChars > 0 {
 		t.tail = lastRunes(s, t.opts.ContextChars)
 	}
 	t.emit("", nil)
@@ -692,6 +698,11 @@ func stripTags(s string) string {
 }
 
 func lastRunes(s string, n int) string {
+	if n <= 0 {
+		// Not "the last nothing of it", which an ellipsis on its own would
+		// claim: no continuity at all.
+		return ""
+	}
 	r := []rune(s)
 	if len(r) <= n {
 		return s

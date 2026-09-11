@@ -18,7 +18,25 @@ import (
 // RunHeadless translates a book without the interactive interface. Progress is
 // written to standard error so that standard output carries only the path of
 // the finished book, which keeps the command usable in a pipeline.
-func RunHeadless(ctx context.Context, cfg config.Config, source, output string, retry, quiet bool) error {
+// HeadlessOptions are the run-level choices of one non-interactive run. They
+// are grouped rather than passed one after another: the list had reached six
+// positional parameters, where a caller swapping two booleans would compile.
+type HeadlessOptions struct {
+	// Output is where the translated book goes. Empty derives it from the
+	// source and the target language.
+	Output string
+	// Chapters restricts the run, written the way the report numbers them:
+	// "1-3,7". Empty translates the whole book.
+	Chapters string
+	// Retry re-attempts the passages an earlier run left in the source
+	// language instead of accepting a cached document as finished.
+	Retry bool
+	// Quiet prints nothing but the path of the file produced.
+	Quiet bool
+}
+
+func RunHeadless(ctx context.Context, cfg config.Config, source string, o HeadlessOptions) error {
+	output, retry, quiet := o.Output, o.Retry, o.Quiet
 	book, err := epub.Open(source)
 	if err != nil {
 		return err
@@ -36,8 +54,14 @@ func RunHeadless(ctx context.Context, cfg config.Config, source, output string, 
 		return err
 	}
 
+	only, err := translate.SelectDocuments(book.TranslatableDocuments(), o.Chapters)
+	if err != nil {
+		return err
+	}
+
 	opts := translate.BookOptions{
 		Options:      cfg.TranslateOptions(),
+		Only:         only,
 		RetryPending: retry,
 		Salvage:      cfg.SalvagePass,
 	}

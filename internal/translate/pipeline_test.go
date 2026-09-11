@@ -188,7 +188,7 @@ func TestRecipeKeyChangesWithEverySemanticSetting(t *testing.T) {
 		TargetLanguage: "français", TargetCode: "fr",
 		SourceLanguage: "english", SourceCode: "en",
 		Glossary: "a = b", StyleNotes: "sobre", About: "un roman",
-		KeepOriginalTitles: false,
+		KeepOriginalTitles: false, ContextChars: 400,
 	}
 	seen := map[string]string{base.key("livre"): "base"}
 
@@ -205,6 +205,8 @@ func TestRecipeKeyChangesWithEverySemanticSetting(t *testing.T) {
 			f.SetString(f.String() + "-autre")
 		case reflect.Bool:
 			f.SetBool(!f.Bool())
+		case reflect.Int:
+			f.SetInt(f.Int() + 137)
 		default:
 			t.Fatalf("%s has kind %s, which this test does not know how to vary", name, f.Kind())
 		}
