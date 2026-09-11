@@ -90,6 +90,11 @@ type Recipe struct {
 	// chapter cached with its heading translated must not be served to a run
 	// that asked for the original titles.
 	KeepOriginalTitles bool
+	// ContextChars belongs here for the same reason: it decides how much of
+	// the previous passage the model is shown, so it changes what the model
+	// answers. Without it, turning continuity down and running again handed
+	// back the whole book from the cache, translated under the old setting.
+	ContextChars int
 }
 
 // key derives the cache identity of a book translated under this recipe.
@@ -99,6 +104,7 @@ func (r Recipe) key(fingerprint string) string {
 		r.TargetLanguage, r.TargetCode, r.SourceLanguage, r.SourceCode,
 		r.Glossary, r.StyleNotes, r.About,
 		strconv.FormatBool(r.KeepOriginalTitles),
+		strconv.Itoa(r.ContextChars),
 	}, "\x00")))
 	return hex.EncodeToString(sum[:])[:16]
 }

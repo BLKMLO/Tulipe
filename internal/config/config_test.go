@@ -484,3 +484,74 @@ func TestConfigWrittenBeforeTheTitleSettingStillTranslatesTitles(t *testing.T) {
 		t.Error("an older configuration file must keep the behaviour it had")
 	}
 }
+
+func TestContinuityCanActuallyBeTurnedOff(t *testing.T) {
+	// The setting accepted 0 and went on showing the model four hundred
+	// characters of the previous passage. Two layers had to be fixed: the
+	// configuration repaired the zero, and the translator's own Defaults
+	// repaired it again.
+	cfg := Default()
+	if cfg.ContextChars != 400 {
+		t.Fatalf("a first run starts at %d characters of continuity", cfg.ContextChars)
+	}
+
+	cfg.ContextChars = 0
+	if got := cfg.normalise().ContextChars; got != 0 {
+		t.Errorf("normalise turned a chosen 0 into %d", got)
+	}
+	// "None" is any value the translator reads as none; the exact encoding is
+	// its business, and it keeps a negative one so that Defaults stays
+	// idempotent. What matters here is that nothing gets shown.
+	if got := cfg.TranslateOptions().Defaults().ContextChars; got > 0 {
+		t.Errorf("the translator ends up showing %d characters although none were asked for", got)
+	}
+
+	// A negative value is nonsense rather than a choice, and is repaired.
+	cfg.ContextChars = -5
+	if got := cfg.normalise().ContextChars; got != 400 {
+		t.Errorf("a nonsensical -5 became %d, want the default back", got)
+	}
+
+	// And an ordinary value still travels unchanged.
+	cfg.ContextChars = 250
+	if got := cfg.TranslateOptions().Defaults().ContextChars; got != 250 {
+		t.Errorf("250 characters became %d", got)
+	}
+}
+
+func TestContinuityChangesTheCacheKey(t *testing.T) {
+	// It changes what the model is shown, so it changes what comes back.
+	// Without it in the recipe, turning continuity down and running again
+	// handed back the whole book from the cache, translated under the old
+	// setting.
+	cfg := Default()
+	base := cfg.Recipe()
+
+	cfg.ContextChars = 50
+	if cfg.Recipe() == base {
+		t.Error("changing the continuity left the recipe identical")
+	}
+	cfg.ContextChars = 0
+	if cfg.Recipe() == base {
+		t.Error("turning continuity off left the recipe identical")
+	}
+}
+
+func TestAConfigWrittenBeforeTheContinuityFixKeepsItsBehaviour(t *testing.T) {
+	// A file with no "context_chars" key at all must still get the default,
+	// not silently lose its continuity.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"provider":"anthropic","model":"m"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TULIPE_CONFIG", path)
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.ContextChars != 400 {
+		t.Errorf("ContextChars = %d, want the default kept", cfg.ContextChars)
+	}
+}

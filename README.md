@@ -167,6 +167,9 @@ tulipe translate --provider groq --model <the model you picked> \
                  --to French --code fr \
                  --glossary-file proper-nouns.txt my-book.epub
 
+# one chapter, without re-translating the rest
+tulipe translate --to French --code fr --chapters 4 my-book.epub
+
 # plain text instead of EPUB
 tulipe translate --to French --code fr --format txt my-book.epub
 
@@ -287,7 +290,8 @@ Newspeak = novlangue
 ```
 
 **Continuity** shows the model the end of the previous passage, purely as
-context, so it picks the tone and rhythm back up.
+context, so it picks the tone and rhythm back up. Set it to 0 — `--context 0`,
+or the **Continuity** setting — to send each passage on its own.
 
 ## When things go wrong
 
@@ -376,9 +380,9 @@ Translated chapters are kept in your system's cache folder
 left off; the **Resume a translation** menu entry lists pending jobs, and
 `--no-resume` ignores the cache.
 
-Changing the model, language, glossary, context, style notes or the titles
-setting starts a fresh translation: the cache accounts for everything that
-changes the outcome. Adjusting the batch size doesn't discard it, and neither
+Changing the model, language, glossary, context, style notes, the titles
+setting or the continuity starts a fresh translation: the cache accounts for
+everything that changes the outcome. Adjusting the batch size doesn't discard it, and neither
 does turning the second attempt on or off — that changes how many passages
 come back, not what any one of them says.
 
@@ -399,6 +403,7 @@ come back, not what any one of them says.
 --glossary-file  glossary, one "source = target" rule per line
 --style          style notes appended to the instructions
 --about          the book in one sentence, to calibrate register
+--chapters       translate only these chapters, numbered as the report does: 1-3,7
 --titles         translate headings and the table of contents (default true)
 --salvage        retry the flagged passages once the book is done (default true)
 --retry          retry the passages left in the source language

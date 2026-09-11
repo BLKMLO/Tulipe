@@ -96,11 +96,15 @@ type Config struct {
 	// behaviour it had.
 	TranslateTitles bool `json:"translate_titles"`
 
-	ChunkChars   int   `json:"chunk_chars"`
-	MaxSegments  int   `json:"max_segments"`
-	MaxTokens    int64 `json:"max_tokens"`
-	Attempts     int   `json:"attempts"`
-	ContextChars int   `json:"context_chars"`
+	ChunkChars  int   `json:"chunk_chars"`
+	MaxSegments int   `json:"max_segments"`
+	MaxTokens   int64 `json:"max_tokens"`
+	Attempts    int   `json:"attempts"`
+	// ContextChars is how much of the previous passage the model is shown for
+	// continuity of tone and vocabulary. Zero means none — unlike the
+	// translator's own field, where zero means "not set", this one carries
+	// what the reader chose, and "none" is one of the answers.
+	ContextChars int `json:"context_chars"`
 	// TimeoutSeconds caps one call to the model.
 	TimeoutSeconds int `json:"timeout_seconds"`
 
@@ -208,7 +212,10 @@ func (c Config) normalise() Config {
 	if c.Attempts <= 0 {
 		c.Attempts = d.Attempts
 	}
-	if c.ContextChars <= 0 {
+	if c.ContextChars < 0 {
+		// Only a nonsensical value is repaired. Zero is a choice, and
+		// overwriting it was why the setting accepted "0" and went on showing
+		// the model four hundred characters anyway.
 		c.ContextChars = d.ContextChars
 	}
 	if c.TimeoutSeconds <= 0 {
@@ -421,7 +428,19 @@ func (c Config) Recipe() translate.Recipe {
 		About:          c.About,
 
 		KeepOriginalTitles: !c.TranslateTitles,
+		ContextChars:       c.ContextChars,
 	}
+}
+
+// continuity converts the reader's answer into the translator's convention.
+// The two disagree about zero on purpose: in Config it means "none", in
+// Options it means "nothing was set, use the default". Negative is how Options
+// spells none.
+func continuity(configured int) int {
+	if configured <= 0 {
+		return -1
+	}
+	return configured
 }
 
 // TranslateOptions converts the configuration into translator options.
@@ -440,7 +459,7 @@ func (c Config) TranslateOptions() translate.Options {
 		MaxTokens:          c.MaxTokens,
 		Attempts:           c.Attempts,
 		RetryBase:          2 * time.Second,
-		ContextChars:       c.ContextChars,
+		ContextChars:       continuity(c.ContextChars),
 		RequestTimeout:     time.Duration(c.TimeoutSeconds) * time.Second,
 	}
 }

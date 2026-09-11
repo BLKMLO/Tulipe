@@ -672,3 +672,94 @@ func TestADocumentLevelNoteDoesNotClaimToBeAboutTheFirstParagraph(t *testing.T) 
 		t.Errorf("a note about the first paragraph must still name it: %s", first)
 	}
 }
+
+func TestDefaultsCanBeAppliedTwice(t *testing.T) {
+	// Book fills in the defaults for the run, and Document fills them in again
+	// for its own copy. Anything repaired here therefore happens twice, so a
+	// repair that changes an already-repaired value is a bug that only shows
+	// up in a whole book, never in a single document.
+	for _, o := range []Options{
+		{},
+		{ContextChars: -1},   // none at all
+		{ContextChars: 250},  // a chosen amount
+		{RequestTimeout: -1}, // no cap
+		{StopAfterFailures: -1},
+		{ChunkChars: 1, MaxSegments: 1, MaxTokens: 1, Attempts: 1},
+	} {
+		once := o.Defaults()
+		twice := once.Defaults()
+		if once.ContextChars != twice.ContextChars {
+			t.Errorf("%+v: ContextChars %d then %d", o, once.ContextChars, twice.ContextChars)
+		}
+		if once.RequestTimeout != twice.RequestTimeout {
+			t.Errorf("%+v: RequestTimeout %v then %v", o, once.RequestTimeout, twice.RequestTimeout)
+		}
+		if once.StopAfterFailures != twice.StopAfterFailures {
+			t.Errorf("%+v: StopAfterFailures %d then %d", o, once.StopAfterFailures, twice.StopAfterFailures)
+		}
+		if once.ChunkChars != twice.ChunkChars || once.MaxSegments != twice.MaxSegments ||
+			once.MaxTokens != twice.MaxTokens || once.Attempts != twice.Attempts {
+			t.Errorf("%+v: the chunking settings moved on the second pass", o)
+		}
+	}
+}
+
+func TestNoContinuityMeansNoContinuityBlock(t *testing.T) {
+	var prompts []string
+	p := &fakeProvider{}
+	p.answer = func(_ int, sources []string) (string, error) { return envelope(upper(sources)), nil }
+	rec := &recordingUserProvider{inner: p, prompts: &prompts}
+
+	// MaxSegments 1 forces several chunks, so a tail would have somewhere to
+	// appear: the first chunk cannot show one whatever the setting.
+	_, err := Document(context.Background(), rec,
+		Options{TargetLanguage: "français", ContextChars: -1, MaxSegments: 1},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if len(prompts) < 2 {
+		t.Fatalf("%d prompt(s) recorded; the test needs at least two chunks", len(prompts))
+	}
+	for i, prompt := range prompts {
+		if strings.Contains(prompt, "For continuity only") {
+			t.Errorf("chunk %d was shown the previous passage although none was asked for:\n%s", i+1, prompt)
+		}
+	}
+}
+
+func TestContinuityIsShownWhenAskedFor(t *testing.T) {
+	var prompts []string
+	p := &fakeProvider{}
+	p.answer = func(_ int, sources []string) (string, error) { return envelope(upper(sources)), nil }
+	rec := &recordingUserProvider{inner: p, prompts: &prompts}
+
+	_, err := Document(context.Background(), rec,
+		Options{TargetLanguage: "français", ContextChars: 400, MaxSegments: 1},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	found := false
+	for _, prompt := range prompts {
+		if strings.Contains(prompt, "For continuity only") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("no chunk was shown the previous passage although continuity is on")
+	}
+}
+
+// recordingUserProvider keeps the user prompt of every request.
+type recordingUserProvider struct {
+	inner   llm.Provider
+	prompts *[]string
+}
+
+func (r *recordingUserProvider) ID() string    { return r.inner.ID() }
+func (r *recordingUserProvider) Model() string { return r.inner.Model() }
+func (r *recordingUserProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+	*r.prompts = append(*r.prompts, req.User)
+	return r.inner.Complete(ctx, req)
+}

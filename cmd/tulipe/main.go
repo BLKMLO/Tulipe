@@ -247,6 +247,7 @@ func orNone(s string) string {
 
 type cliOptions struct {
 	output       string
+	chapters     string
 	glossaryFile string
 	noResume     bool
 	retry        bool
@@ -277,6 +278,7 @@ func translateFlags(cfg *config.Config, o *cliOptions) *flag.FlagSet {
 	fs.StringVar(&cfg.SourceCode, "from-code", cfg.SourceCode, i18n.T("cli.flag.from-code"))
 	fs.StringVar(&cfg.Format, "format", cfg.Format, i18n.T("cli.flag.format"))
 	fs.StringVar(&o.output, "o", "", i18n.T("cli.flag.output"))
+	fs.StringVar(&o.chapters, "chapters", "", i18n.T("cli.flag.chapters"))
 	fs.StringVar(&o.glossaryFile, "glossary-file", "", i18n.T("cli.flag.glossary-file"))
 	fs.BoolVar(&o.noResume, "no-resume", false, i18n.T("cli.flag.no-resume"))
 	fs.BoolVar(&o.retry, "retry", false, i18n.T("cli.flag.retry"))
@@ -336,5 +338,10 @@ func runTranslate(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	return ui.RunHeadless(ctx, cfg, source, o.output, o.retry, o.quiet)
+	return ui.RunHeadless(ctx, cfg, source, ui.HeadlessOptions{
+		Output:   o.output,
+		Chapters: o.chapters,
+		Retry:    o.retry,
+		Quiet:    o.quiet,
+	})
 }
