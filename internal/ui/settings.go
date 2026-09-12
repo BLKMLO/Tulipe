@@ -228,6 +228,13 @@ func settingsFields() []field {
 		},
 		{
 			section: i18n.T("ui.section.requests"),
+			label:   i18n.T("ui.field.rpm"), kind: fieldInt,
+			help: i18n.T("ui.field.rpm.help"),
+			get:  func(c config.Config) string { return strconv.Itoa(c.RequestsPerMinute) },
+			set:  setInt(func(c *config.Config, n int) { c.RequestsPerMinute = n }, 0, 10000),
+		},
+		{
+			section: i18n.T("ui.section.requests"),
 			label:   i18n.T("ui.field.timeout"), kind: fieldInt,
 			help: i18n.T("ui.field.timeout.help"),
 			get:  func(c config.Config) string { return strconv.Itoa(c.TimeoutSeconds) },

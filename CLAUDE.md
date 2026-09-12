@@ -211,6 +211,46 @@ Dans `internal/translate` :
   ajouter aussi un test dans `translate_test.go`, sur le modèle de
   `TestBrokenMarkupIsRejected`.
 
+## Le limiteur de débit
+
+`limiter.go` espace les requêtes pour qu'un livre reste sous le quota d'un
+service. `Config.RequestsPerMinute` à zéro — le défaut — n'espace rien, ce qui
+est le comportement d'avant et celui qu'obtient une configuration écrite avant
+ce réglage.
+
+Quatre choses à ne pas défaire :
+
+- **Le créneau est réservé avant l'attente, pas après.** `reserve` avance
+  `next` sous verrou et rend le délai ; deux appelants ne peuvent donc pas
+  recevoir le même instant. Rien n'est concurrent dans Tulipe aujourd'hui — le
+  limiteur est écrit ainsi parce que la concurrence des requêtes est la
+  prochaine étape, et qu'un limiteur mono-fil serait à réécrire le jour où il
+  servirait enfin.
+- **`next` ne prend pas d'avance sur l'horloge quand rien ne se passe.**
+  `reserve` le recale sur `now` s'il est en retard : un livre dont les
+  chapitres prennent une minute ne doit pas pouvoir tirer soixante requêtes
+  d'un coup ensuite. Le quota est par minute, pas une cagnotte.
+- **`pace` est *dans* la boucle de réessai.** Un réessai est une requête comme
+  une autre pour le service ; le laisser doubler la file, c'est retourner droit
+  dans le 429 dont on sortait.
+- **Le limiteur est partagé par tout le livre**, via un pointeur dans `Options`,
+  exactement comme `failureCounter` : le quota appartient au service, pas au
+  chapitre. `Defaults` ne le remplace donc pas s'il est déjà là — la règle
+  d'idempotence plus bas s'applique ici aussi. Et `salvageOptions` remet le
+  compteur d'échecs à zéro mais **garde** le limiteur : la seconde tentative
+  puise dans le même quota.
+
+Il n'entre pas dans `Recipe` : il change *quand* une requête part, jamais ce
+qui revient.
+
+Une attente d'au moins `noticeableWait` est annoncée ; en dessous le message
+passerait sans être lu. Le mode non interactif affiche ces messages depuis
+qu'il a fallu constater qu'une pause de cinq secondes y était parfaitement
+muette, et que du silence se lit comme un plantage. Seule la répétition
+immédiate à l'intérieur d'un même document est supprimée : un livre cadencé à
+quatre requêtes par minute le dit une fois par chapitre, pas une fois par
+requête.
+
 ## Reprendre les passages manqués
 
 Un segment dont la traduction est refusée par `accept` garde son texte source

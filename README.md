@@ -190,6 +190,16 @@ The terms of each free tier live on the service's own site. Tulipe keeps no
 copy of them: those limits change too often for a number written here to
 still be true by the time you read it.
 
+Most free tiers cap **requests per minute**, and a whole book is what runs into
+that cap. `--rpm 15`, or the **Requests per minute** setting, spaces the
+requests out so the limit is never reached — rather than hitting it, being
+refused, and waiting the refusal out. The number to use is on the service's own
+page.
+
+```bash
+tulipe translate --provider groq --rpm 15 --to French --code fr my-book.epub
+```
+
 Same goes for models: Tulipe ships no list. `tulipe models` asks the service
 directly, which gives you exact, current names.
 
@@ -300,6 +310,7 @@ preserved, and the passage is flagged in the final report.
 | The translation contains forbidden characters | the source is kept: such a book wouldn't open |
 | Markup comes back broken | the original passage is kept and flagged |
 | The service is overloaded | retried, waiting longer each time |
+| The quota is hit | better not to: `--rpm` spaces the requests out so it isn't |
 | The service stops responding | the call is abandoned after a timeout, then retried |
 | Key refused, quota exhausted | immediate stop, rather than grinding through the book for nothing |
 | A chapter yielded nothing | it's marked as failed, never presented as translated |
@@ -398,6 +409,7 @@ come back, not what any one of them says.
 --style          style notes appended to the instructions
 --about          the book in one sentence, to calibrate register
 --chapters       translate only these chapters, numbered as the report does: 1-3,7
+--rpm            cap requests per minute, to stay under a service's quota
 --titles         translate headings and the table of contents (default true)
 --salvage        retry the flagged passages once the book is done (default true)
 --retry          retry the passages left in the source language

@@ -72,6 +72,13 @@ type Options struct {
 	// distinguishable from an unset field — config.Config carries the reader's
 	// choice, where zero does mean none, and converts.
 	ContextChars int
+	// RequestsPerMinute spaces requests out so a run stays under a service's
+	// quota. Zero means no limit, which is the older behaviour and what a
+	// caller that never heard of it should get.
+	//
+	// It is not part of Recipe: it changes when a request leaves, never what
+	// comes back.
+	RequestsPerMinute int
 	// StopAfterFailures aborts the run once this many requests in a row have
 	// failed without a single success, so a dead or misconfigured service
 	// cannot grind through a whole book. Zero uses the default; a negative
@@ -88,6 +95,9 @@ type Options struct {
 	// broken service once rather than once per chapter. Book sets it; Document
 	// allocates its own when it is nil.
 	failures *failureCounter
+	// limiter is shared the same way and for the same reason: a quota belongs
+	// to the service, not to the chapter. Nil means no limit.
+	limiter *limiter
 }
 
 // messageError is a sentinel whose wording is read when it is printed rather
@@ -154,6 +164,11 @@ func (o Options) Defaults() Options {
 	}
 	if o.failures == nil {
 		o.failures = &failureCounter{limit: o.StopAfterFailures}
+	}
+	if o.limiter == nil {
+		// newLimiter answers nil below one request per minute, so this stays
+		// idempotent either way: Book fills it in, Document finds it filled.
+		o.limiter = newLimiter(o.RequestsPerMinute)
 	}
 	return o
 }
@@ -518,6 +533,9 @@ func (t *translator) requestDirect(direct llm.DirectTranslator, lo, hi int, sour
 	err := llm.Retry(t.ctx, t.opts.Attempts, t.opts.RetryBase, func(n llm.RetryNotice) {
 		t.emit("", &n)
 	}, func() error {
+		if err := t.pace(); err != nil {
+			return err
+		}
 		t.res.Attempted++
 		ctx, cancel := t.requestContext()
 		resp, err := direct.TranslateSegments(ctx, req)
@@ -604,6 +622,9 @@ func (t *translator) call(req llm.Request) (*llm.Response, error) {
 	err := llm.Retry(t.ctx, t.opts.Attempts, t.opts.RetryBase, func(n llm.RetryNotice) {
 		t.emit("", &n)
 	}, func() error {
+		if err := t.pace(); err != nil {
+			return err
+		}
 		t.res.Attempted++
 		ctx, cancel := t.requestContext()
 		r, err := t.provider.Complete(ctx, req)
@@ -617,6 +638,16 @@ func (t *translator) call(req llm.Request) (*llm.Response, error) {
 		return nil
 	})
 	return resp, err
+}
+
+// pace holds the caller until the rate limiter lets this request through. It
+// sits inside the retry loop on purpose: a retry is a request like any other
+// as far as the service's quota is concerned, and letting retries jump the
+// queue is how a run walks straight back into the 429 it was recovering from.
+func (t *translator) pace() error {
+	return t.opts.limiter.wait(t.ctx, func(d time.Duration) {
+		t.emit(i18n.T("translate.msg.rate-limit", d.Round(time.Second), t.opts.RequestsPerMinute), nil)
+	})
 }
 
 // requestContext bounds one call to the backend.

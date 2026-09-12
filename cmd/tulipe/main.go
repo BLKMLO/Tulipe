@@ -105,6 +105,7 @@ func showConfig(_ []string) error {
 	line("cli.config.max-tokens", fmt.Sprintf("%d", cfg.MaxTokens))
 	line("cli.config.attempts", fmt.Sprintf("%d", cfg.Attempts))
 	line("cli.config.timeout", i18n.T("cli.config.timeout.value", cfg.TimeoutSeconds))
+	line("cli.config.rpm", rpmLabel(cfg.RequestsPerMinute))
 	line("cli.config.context", i18n.T("cli.config.context.value", cfg.ContextChars))
 	line("cli.config.resume", fmt.Sprintf("%v", cfg.Resume))
 	line("cli.config.salvage", fmt.Sprintf("%v", cfg.SalvagePass))
@@ -238,6 +239,15 @@ func takeLang(args []string) []string {
 	return rest
 }
 
+// rpmLabel describes the rate limit, saying "none" rather than "0" — a quota
+// of zero requests would be a program that cannot work.
+func rpmLabel(n int) string {
+	if n <= 0 {
+		return i18n.T("cli.config.rpm.none")
+	}
+	return i18n.T("cli.config.rpm.value", n)
+}
+
 func orNone(s string) string {
 	if s == "" {
 		return i18n.T("ui.dash")
@@ -271,6 +281,7 @@ func translateFlags(cfg *config.Config, o *cliOptions) *flag.FlagSet {
 	fs.IntVar(&cfg.Attempts, "attempts", cfg.Attempts, i18n.T("cli.flag.attempts"))
 	fs.IntVar(&cfg.ContextChars, "context", cfg.ContextChars, i18n.T("cli.flag.context"))
 	fs.IntVar(&cfg.TimeoutSeconds, "timeout", cfg.TimeoutSeconds, i18n.T("cli.flag.timeout"))
+	fs.IntVar(&cfg.RequestsPerMinute, "rpm", cfg.RequestsPerMinute, i18n.T("cli.flag.rpm"))
 	fs.StringVar(&cfg.StyleNotes, "style", cfg.StyleNotes, i18n.T("cli.flag.style"))
 	fs.StringVar(&cfg.About, "about", cfg.About, i18n.T("cli.flag.about"))
 	fs.BoolVar(&cfg.TranslateTitles, "titles", cfg.TranslateTitles, i18n.T("cli.flag.titles"))

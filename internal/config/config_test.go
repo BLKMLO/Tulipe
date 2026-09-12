@@ -555,3 +555,50 @@ func TestAConfigWrittenBeforeTheContinuityFixKeepsItsBehaviour(t *testing.T) {
 		t.Errorf("ContextChars = %d, want the default kept", cfg.ContextChars)
 	}
 }
+
+func TestTheRateLimitReachesTheTranslator(t *testing.T) {
+	cfg := Default()
+	if cfg.RequestsPerMinute != 0 {
+		t.Errorf("a first run is limited to %d requests a minute; it should send freely", cfg.RequestsPerMinute)
+	}
+	cfg.RequestsPerMinute = 15
+	if got := cfg.TranslateOptions().RequestsPerMinute; got != 15 {
+		t.Errorf("the translator was told %d requests a minute", got)
+	}
+	// What the translator does with that number is its own business, and
+	// internal/translate tests it there.
+
+	// Nonsense is repaired to "no limit": a quota of minus one request cannot
+	// be honoured, and refusing to send at all would be worse.
+	cfg.RequestsPerMinute = -3
+	if got := cfg.normalise().RequestsPerMinute; got != 0 {
+		t.Errorf("-3 requests a minute became %d, want no limit", got)
+	}
+}
+
+func TestTheRateLimitStaysOutOfTheCacheKey(t *testing.T) {
+	// It changes when a request leaves, never what comes back. Putting it in
+	// the recipe would throw away a whole book's cache for a pacing change.
+	cfg := Default()
+	base := cfg.Recipe()
+	cfg.RequestsPerMinute = 15
+	if cfg.Recipe() != base {
+		t.Error("changing the rate limit changed the cache key")
+	}
+}
+
+func TestAConfigWrittenBeforeTheRateLimitSendsFreely(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(path, []byte(`{"provider":"anthropic","model":"m"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TULIPE_CONFIG", path)
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.RequestsPerMinute != 0 {
+		t.Errorf("an older configuration came back limited to %d a minute", cfg.RequestsPerMinute)
+	}
+}
