@@ -253,6 +253,13 @@ var messagesFR = map[string]string{
 	"ui.test.no-usage": "  (ce fournisseur ne communique pas de décompte de jetons)",
 
 	// -- internal/ui : réglages ------------------------------------------
+	"ui.section.interface":        "INTERFACE",
+	"ui.section.service":          "SERVICE",
+	"ui.section.languages":        "LANGUES",
+	"ui.section.translation":      "TRADUCTION",
+	"ui.section.requests":         "REQUÊTES",
+	"ui.section.recovery":         "REPRISE",
+	"ui.section.output":           "SORTIE",
 	"ui.settings.title":           "réglages",
 	"ui.settings.unsaved":         "modifications non enregistrées",
 	"ui.settings.unsaved.warn":    "Réglages non enregistrés — « s » pour enregistrer, « échap » à nouveau pour abandonner.",

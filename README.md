@@ -78,14 +78,6 @@ you downloaded:
 sha256sum -c SHA256SUMS --ignore-missing
 ```
 
-The Linux archive also holds `tulipe.desktop` and `tulipe.png`, if you want
-Tulipe in your applications menu:
-
-```bash
-install -Dm644 tulipe.png     ~/.local/share/icons/hicolor/512x512/apps/tulipe.png
-install -Dm644 tulipe.desktop ~/.local/share/applications/tulipe.desktop
-```
-
 Or build from source — all you need is Go 1.24, nothing else:
 
 ```bash
@@ -138,7 +130,9 @@ Tulipe's menus, messages and errors are in **English by default**, and in
 **French** if you'd rather. It is the first entry in the settings screen:
 
 ```
+ INTERFACE
 › Interface language      ‹ English ›
+ SERVICE
   Service                 ‹ anthropic ›
   Model                   claude-opus-5
 ```

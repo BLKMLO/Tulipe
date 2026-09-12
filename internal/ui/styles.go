@@ -41,6 +41,11 @@ var (
 
 	labelStyle = lipgloss.NewStyle().Foreground(muted)
 
+	// sectionStyle titles a group of settings. It is set apart by weight and
+	// colour rather than by a blank line above it: a blank line is a row, and
+	// seven of them would cost a third of a short terminal.
+	sectionStyle = lipgloss.NewStyle().Foreground(petal).Bold(true).PaddingLeft(1)
+
 	valueStyle = lipgloss.NewStyle().Foreground(ink)
 
 	accentStyle = lipgloss.NewStyle().Foreground(petal)

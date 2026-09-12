@@ -253,6 +253,13 @@ var messagesEN = map[string]string{
 	"ui.test.no-usage": "  (this provider reports no token count)",
 
 	// -- internal/ui: settings -------------------------------------------
+	"ui.section.interface":        "INTERFACE",
+	"ui.section.service":          "SERVICE",
+	"ui.section.languages":        "LANGUAGES",
+	"ui.section.translation":      "TRANSLATION",
+	"ui.section.requests":         "REQUESTS",
+	"ui.section.recovery":         "RESUMING",
+	"ui.section.output":           "OUTPUT",
 	"ui.settings.title":           "settings",
 	"ui.settings.unsaved":         "unsaved changes",
 	"ui.settings.unsaved.warn":    "Settings not saved — “s” to save, “esc” again to discard.",
