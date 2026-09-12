@@ -88,12 +88,14 @@ func RunHeadless(ctx context.Context, cfg config.Config, source string, o Headle
 	log(i18n.T("cli.headless.header"), orDash(book.Title), cfg.TargetLanguage, cfg.Model, cfg.Provider)
 
 	seen := map[int]translate.Status{}
+	lastMessage := ""
 	res, err := translate.Book(ctx, provider, book, opts, func(p translate.Progress) {
 		for i, d := range p.Documents {
 			if seen[i] == d.Status {
 				continue
 			}
 			seen[i] = d.Status
+			lastMessage = "" // a new document may well have the same thing to say
 			switch d.Status {
 			case translate.StatusRunning:
 				log(i18n.T("cli.headless.running"), d.Title, d.TotalSegments)
@@ -107,6 +109,18 @@ func RunHeadless(ctx context.Context, cfg config.Config, source string, o Headle
 		}
 		if p.Retry != nil {
 			log(i18n.T("cli.headless.retry"), p.Retry.Attempt, p.Retry.Wait.Round(time.Second), p.Retry.Err)
+		}
+		// The progress screen shows these; without them here a run that is
+		// waiting out a rate limit, splitting a batch or re-sending an
+		// unusable answer sits silent, and silence reads as a hang.
+		//
+		// Only an immediate repeat inside one document is dropped, so a book
+		// paced at four requests a minute says so once per chapter rather
+		// than once per request — enough to show it is alive, not enough to
+		// bury the rest.
+		if p.Message != "" && p.Message != lastMessage {
+			lastMessage = p.Message
+			log(i18n.T("cli.headless.message"), p.Message)
 		}
 	})
 	if err != nil {

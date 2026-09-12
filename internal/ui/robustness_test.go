@@ -340,3 +340,86 @@ func TestWindowCountsItsOwnMarkers(t *testing.T) {
 		}
 	}
 }
+
+func TestEverySettingSitsUnderAHeading(t *testing.T) {
+	// A heading only means something if the fields under it are consecutive:
+	// a field that strays into another group would print its own title again
+	// halfway down the list.
+	defer i18n.SetLocale(i18n.DefaultLocale)
+	for _, code := range i18n.Locales {
+		i18n.SetLocale(code)
+		f := newSettingsForm(config.Default())
+
+		seen := map[string]bool{}
+		section := ""
+		for _, fd := range f.fields {
+			if fd.section == "" {
+				t.Errorf("%s: %q belongs to no section", code, fd.label)
+				continue
+			}
+			if fd.section == section {
+				continue
+			}
+			if seen[fd.section] {
+				t.Errorf("%s: section %q comes back after %q; its fields are not consecutive",
+					code, fd.section, section)
+			}
+			seen[fd.section] = true
+			section = fd.section
+		}
+		if len(seen) < 2 {
+			t.Errorf("%s: %d section(s); the grouping is the point", code, len(seen))
+		}
+	}
+}
+
+func TestAHeadingWithNothingUnderItIsNotDrawn(t *testing.T) {
+	// Effort is Anthropic's alone. Were it the only field of its section, the
+	// title would otherwise sit above nothing at all on every other service.
+	cfg := config.Default()
+	cfg.Provider = config.ProviderOpenAI
+	f := newSettingsForm(cfg)
+
+	rows := f.listRows()
+	for i, r := range rows {
+		if r.field < 0 && (i == len(rows)-1 || rows[i+1].field < 0) {
+			t.Errorf("section %q is drawn with no setting under it", r.heading)
+		}
+	}
+	// And what is hidden really is hidden.
+	for _, idx := range f.visible() {
+		if f.fields[idx].label == i18n.T("ui.field.effort") {
+			t.Error("effort is offered although the service has no such setting")
+		}
+	}
+}
+
+func TestTheListCountsSettingsAndNotItsOwnHeadings(t *testing.T) {
+	// "12 more below" has to mean twelve settings. Counting the titles too
+	// would promise more than the list holds.
+	f := newSettingsForm(config.Default())
+	rows := f.listRows()
+	if got := countFields(rows); got != len(f.visible()) {
+		t.Errorf("countFields = %d over the whole list, want the %d visible settings",
+			got, len(f.visible()))
+	}
+	for i := range rows {
+		if a, b := countFields(rows[:i]), countFields(rows[i:]); a+b != len(f.visible()) {
+			t.Errorf("cut at %d: %d above + %d below != %d settings", i, a, b, len(f.visible()))
+		}
+	}
+}
+
+func TestTheWindowFindsTheSelectedSetting(t *testing.T) {
+	f := newSettingsForm(config.Default())
+	rows := f.listRows()
+	for i := range f.visible() {
+		row := rows.rowOf(i)
+		if row < 0 || row >= len(rows) {
+			t.Fatalf("field %d maps to row %d of %d", i, row, len(rows))
+		}
+		if rows[row].field != i {
+			t.Errorf("field %d maps to row %d, which holds field %d", i, row, rows[row].field)
+		}
+	}
+}

@@ -107,6 +107,10 @@ type Config struct {
 	ContextChars int `json:"context_chars"`
 	// TimeoutSeconds caps one call to the model.
 	TimeoutSeconds int `json:"timeout_seconds"`
+	// RequestsPerMinute spaces requests out so a long book stays under the
+	// service's quota. Zero means no limit, which is what a configuration
+	// written before this setting existed gets, and what it had.
+	RequestsPerMinute int `json:"requests_per_minute,omitempty"`
 
 	// SalvagePass retries, once the book is finished, the passages the first
 	// pass could not translate: smaller batches, a prompt that says as much.
@@ -212,6 +216,9 @@ func (c Config) normalise() Config {
 	if c.Attempts <= 0 {
 		c.Attempts = d.Attempts
 	}
+	if c.RequestsPerMinute < 0 {
+		c.RequestsPerMinute = 0 // nonsense; no limit is the safe reading
+	}
 	if c.ContextChars < 0 {
 		// Only a nonsensical value is repaired. Zero is a choice, and
 		// overwriting it was why the setting accepted "0" and went on showing
@@ -277,6 +284,7 @@ func (c Config) Validate() error {
 		{"--max-tokens", int(c.MaxTokens), 1},
 		{"--attempts", c.Attempts, 1},
 		{"--context", c.ContextChars, 0},
+		{"--rpm", c.RequestsPerMinute, 0},
 		{"--timeout", c.TimeoutSeconds, 1},
 	} {
 		if f.v < f.min {
@@ -460,6 +468,7 @@ func (c Config) TranslateOptions() translate.Options {
 		Attempts:           c.Attempts,
 		RetryBase:          2 * time.Second,
 		ContextChars:       continuity(c.ContextChars),
+		RequestsPerMinute:  c.RequestsPerMinute,
 		RequestTimeout:     time.Duration(c.TimeoutSeconds) * time.Second,
 	}
 }

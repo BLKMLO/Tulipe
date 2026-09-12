@@ -211,6 +211,46 @@ Dans `internal/translate` :
   ajouter aussi un test dans `translate_test.go`, sur le modèle de
   `TestBrokenMarkupIsRejected`.
 
+## Le limiteur de débit
+
+`limiter.go` espace les requêtes pour qu'un livre reste sous le quota d'un
+service. `Config.RequestsPerMinute` à zéro — le défaut — n'espace rien, ce qui
+est le comportement d'avant et celui qu'obtient une configuration écrite avant
+ce réglage.
+
+Quatre choses à ne pas défaire :
+
+- **Le créneau est réservé avant l'attente, pas après.** `reserve` avance
+  `next` sous verrou et rend le délai ; deux appelants ne peuvent donc pas
+  recevoir le même instant. Rien n'est concurrent dans Tulipe aujourd'hui — le
+  limiteur est écrit ainsi parce que la concurrence des requêtes est la
+  prochaine étape, et qu'un limiteur mono-fil serait à réécrire le jour où il
+  servirait enfin.
+- **`next` ne prend pas d'avance sur l'horloge quand rien ne se passe.**
+  `reserve` le recale sur `now` s'il est en retard : un livre dont les
+  chapitres prennent une minute ne doit pas pouvoir tirer soixante requêtes
+  d'un coup ensuite. Le quota est par minute, pas une cagnotte.
+- **`pace` est *dans* la boucle de réessai.** Un réessai est une requête comme
+  une autre pour le service ; le laisser doubler la file, c'est retourner droit
+  dans le 429 dont on sortait.
+- **Le limiteur est partagé par tout le livre**, via un pointeur dans `Options`,
+  exactement comme `failureCounter` : le quota appartient au service, pas au
+  chapitre. `Defaults` ne le remplace donc pas s'il est déjà là — la règle
+  d'idempotence plus bas s'applique ici aussi. Et `salvageOptions` remet le
+  compteur d'échecs à zéro mais **garde** le limiteur : la seconde tentative
+  puise dans le même quota.
+
+Il n'entre pas dans `Recipe` : il change *quand* une requête part, jamais ce
+qui revient.
+
+Une attente d'au moins `noticeableWait` est annoncée ; en dessous le message
+passerait sans être lu. Le mode non interactif affiche ces messages depuis
+qu'il a fallu constater qu'une pause de cinq secondes y était parfaitement
+muette, et que du silence se lit comme un plantage. Seule la répétition
+immédiate à l'intérieur d'un même document est supprimée : un livre cadencé à
+quatre requêtes par minute le dit une fois par chapitre, pas une fois par
+requête.
+
 ## Reprendre les passages manqués
 
 Un segment dont la traduction est refusée par `accept` garde son texte source
@@ -286,6 +326,29 @@ liste garde sa hauteur quand le curseur se déplace au lieu de bouger sous lui.
 de 40×10 à 200×50. Un panneau à contenu fixe — celui de l'écran du livre — reste
 plus haut qu'un terminal de dix lignes : la coupe à droite tient toujours, la
 hauteur non, et c'est assumé.
+
+## Les réglages sont rangés par thème
+
+Chaque `field` porte une `section` : un titre de groupe, clé i18n comme le
+reste. **Les champs d'une même section doivent se suivre dans la liste** —
+sinon le titre réapparaît au milieu, puisqu'il est émis à chaque changement de
+section. `TestEverySettingSitsUnderAHeading` refuse un champ égaré et un champ
+sans section.
+
+`settingsForm.listRows` aplatit titres et champs dans **une seule liste**, et
+c'est `window` qui la découpe. Dessiner les titres hors du budget les rendrait
+invisibles au compte de lignes, et le bas de l'écran repartirait — c'est
+exactement le défaut corrigé en 0.3.1. `rowOf` retrouve la ligne du champ
+sélectionné, sur laquelle la fenêtre se centre ; la navigation, elle, reste sur
+les champs visibles et ne s'arrête jamais sur un titre.
+
+Deux détails qui se paient en lignes : les compteurs « n au-dessus » et « n en
+dessous » comptent des **réglages**, pas des titres (`countFields`) — promettre
+douze réglages et n'en avoir que huit sous la main serait faux ; et une section
+dont tous les champs sont masqués — l'effort hors d'Anthropic — n'affiche pas
+son titre. Le style met le titre en valeur par la graisse et la couleur, jamais
+par une ligne vide au-dessus : sept lignes vides mangeraient un tiers d'un
+terminal court.
 
 `Model.help` replie les rappels de touches plutôt que de les laisser filer :
 coupée, la ligne perdait « s enregistrer », donc le moyen d'enregistrer.
@@ -600,15 +663,19 @@ posé à côté du paquet principal, et l'explorateur y lit l'icône. Aucun code
 ne s'y réfère et aucune autre cible n'est touchée — c'est le suffixe du nom de
 fichier qui fait tout le travail, donc **ne pas le renommer**.
 
-Sur Linux, `assets/tulipe.desktop` et `assets/tulipe.png` voyagent dans
-l'archive : `Icon=tulipe` ne désigne rien si le PNG n'est pas installé.
-`Terminal=true` est indispensable, sans quoi le lanceur ouvre une fenêtre qui
-se referme aussitôt.
+**Sur Linux et macOS il n'y en a pas, et il ne faut pas réessayer.** Les deux
+butent sur la même chose : l'icône y est portée par un fichier *à côté* du
+programme, jamais par le programme. Un environnement de bureau Linux lit une
+entrée `.desktop` et une image posées dans les répertoires du thème ; un ELF
+n'a aucun moyen d'annoncer une icône. Le Finder lit l'icône d'un paquet `.app`,
+que le lanceur attend graphique — emballer un programme de terminal dedans
+revient à livrer un paquet dont le seul rôle est d'ouvrir Terminal.
 
-Sur macOS il n'y a rien d'honnête à faire, et `assets/README.md` le dit plutôt
-que de laisser redécouvrir le manque : le Finder lit l'icône d'un paquet
-`.app`, que le lanceur attend graphique. Emballer un programme de terminal
-dedans revient à livrer un paquet dont le seul rôle est d'ouvrir Terminal.
+Les embarquer dans le binaire pour les recracher à l'installation ne sauve
+rien : ça reste des fichiers sur le disque, et la première règle de ce fichier
+interdit les assets embarqués. **Une archive contient donc un exécutable et
+rien d'autre.** C'est ce qui a été choisi contre une icône Linux, en
+connaissance de cause ; `assets/README.md` le redit là où on ira chercher.
 
 `assets/gen_icon.go` (`//go:build ignore`) dérive le reste du maître. Deux
 détails à ne pas défaire : le blanc des coins est retiré **par propagation
@@ -632,8 +699,8 @@ Trois choses à ne pas défaire :
 
 - Les vérifications (`gofmt`, `go vet`, `go test -race`) tournent **avant** la
   compilation. Une version ne se publie pas sur du code non vérifié.
-- L'archive Linux embarque aussi `tulipe.desktop` et `tulipe.png` ; le binaire
-  qu'elle contient s'appelle toujours simplement `tulipe`.
+- **Chaque archive contient exactement un fichier.** L'icône Windows voyage
+  dans l'exécutable ; ailleurs il n'y en a pas, et rien ne l'accompagne.
 - Le nom des archives dit `macos`, pas `darwin`. `darwin` est le `GOOS` de Go,
   exact mais illisible pour qui télécharge.
 - L'archive contient un binaire nommé simplement `tulipe`, pas le nom long de

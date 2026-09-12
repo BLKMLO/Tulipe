@@ -46,6 +46,8 @@ func salvageOptions(o Options) Options {
 	// answering, and the one that just translated a book plainly has not. It
 	// can still trip inside the pass if the service dies now.
 	o.failures = &failureCounter{limit: o.StopAfterFailures}
+	// The limiter is deliberately *not* reset: the quota belongs to the
+	// service and the second pass spends from the same one.
 	return o
 }
 

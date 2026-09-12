@@ -75,16 +75,12 @@ jobs:
             GOOS="$goos" GOARCH="$arch" CGO_ENABLED=0 go build \
               -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
               -o "dist/tulipe${ext}" ./cmd/tulipe
+            # Une archive, un fichier. Sur Windows l'icône voyage dedans :
+            # cmd/tulipe/rsrc_windows_amd64.syso est lié par « go build » sans
+            # qu'on ait à le demander. Ailleurs il n'y a pas d'icône — voir
+            # « L'icône » dans CLAUDE.md.
             if [ -n "$ext" ]; then
-              # L'icône est déjà dans l'exécutable : cmd/tulipe/rsrc_windows_amd64.syso
-              # est lié par « go build » sans qu'on ait à le demander.
               (cd dist && zip -q "${name}.zip" "tulipe${ext}" && rm "tulipe${ext}")
-            elif [ "$goos" = linux ]; then
-              # L'entrée de menu et son icône voyagent avec le binaire : sans
-              # elles, « Icon=tulipe » ne désigne rien sur la machine d'arrivée.
-              cp assets/tulipe.desktop assets/tulipe.png dist/
-              (cd dist && tar czf "${name}.tar.gz" tulipe tulipe.desktop tulipe.png \
-                && rm tulipe tulipe.desktop tulipe.png)
             else
               (cd dist && tar czf "${name}.tar.gz" tulipe && rm tulipe)
             fi

@@ -684,10 +684,18 @@ func TestDefaultsCanBeAppliedTwice(t *testing.T) {
 		{ContextChars: 250},  // a chosen amount
 		{RequestTimeout: -1}, // no cap
 		{StopAfterFailures: -1},
+		{RequestsPerMinute: 30},
+		{RequestsPerMinute: -1},
 		{ChunkChars: 1, MaxSegments: 1, MaxTokens: 1, Attempts: 1},
 	} {
 		once := o.Defaults()
 		twice := once.Defaults()
+		if once.limiter != twice.limiter {
+			t.Errorf("%+v: the limiter was replaced on the second pass", o)
+		}
+		if once.failures != twice.failures {
+			t.Errorf("%+v: the failure counter was replaced on the second pass", o)
+		}
 		if once.ContextChars != twice.ContextChars {
 			t.Errorf("%+v: ContextChars %d then %d", o, once.ContextChars, twice.ContextChars)
 		}
@@ -762,4 +770,75 @@ func (r *recordingUserProvider) Model() string { return r.inner.Model() }
 func (r *recordingUserProvider) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
 	*r.prompts = append(*r.prompts, req.User)
 	return r.inner.Complete(ctx, req)
+}
+
+func TestARateLimitedRunSpacesItsRequests(t *testing.T) {
+	// End to end rather than on the limiter alone: what matters is that every
+	// request a document sends goes through it.
+	const perMinute = 1200 // one every 50ms
+	interval := time.Minute / perMinute
+
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	start := time.Now()
+	res, err := Document(context.Background(), p,
+		Options{TargetLanguage: "français", MaxSegments: 1, RequestsPerMinute: perMinute},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if res.Attempted < 4 {
+		t.Fatalf("%d call(s) made; the test needs several", res.Attempted)
+	}
+	// The first request goes out at once, so n requests cost n-1 intervals.
+	least := time.Duration(res.Attempted-1) * interval
+	if elapsed < least {
+		t.Errorf("%d requests took %v, less than the %v the limit implies", res.Attempted, elapsed, least)
+	}
+}
+
+func TestARetryCountsAgainstTheQuotaToo(t *testing.T) {
+	// A retry is a request as far as the service is concerned. Letting one
+	// jump the queue walks straight back into the refusal it was recovering
+	// from.
+	const perMinute = 1200
+	interval := time.Minute / perMinute
+
+	p := &fakeProvider{}
+	p.answer = func(call int, s []string) (string, error) {
+		if call == 1 {
+			return "pas du json", nil // unusable: the batch is sent again
+		}
+		return envelope(upper(s)), nil
+	}
+
+	start := time.Now()
+	res, err := Document(context.Background(), p,
+		Options{TargetLanguage: "français", RequestsPerMinute: perMinute, Attempts: 1},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if res.Attempted < 2 {
+		t.Fatalf("the malformed answer was not retried: %d call(s)", res.Attempted)
+	}
+	if least := time.Duration(res.Attempted-1) * interval; elapsed < least {
+		t.Errorf("%d requests including a retry took %v, less than %v", res.Attempted, elapsed, least)
+	}
+}
+
+func TestWithoutALimitNothingWaits(t *testing.T) {
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) { return envelope(upper(s)), nil }}
+	start := time.Now()
+	if _, err := Document(context.Background(), p,
+		Options{TargetLanguage: "français", MaxSegments: 1},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil); err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Errorf("an unlimited run took %v", elapsed)
+	}
 }

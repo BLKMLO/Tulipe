@@ -23,6 +23,10 @@ const (
 )
 
 type field struct {
+	// section is the heading this field belongs under. Fields of one section
+	// are consecutive in the list, which is the only thing that makes the
+	// headings mean anything.
+	section string
 	label   string
 	help    string
 	kind    fieldKind
@@ -55,6 +59,7 @@ func newSettingsForm(cfg config.Config) settingsForm {
 func settingsFields() []field {
 	return []field{
 		{
+			section: i18n.T("ui.section.interface"),
 			// The interface language comes first because it decides how every
 			// other line on this screen reads.
 			label: i18n.T("ui.field.interface-language"), kind: fieldChoice, choices: i18n.LocaleNames(),
@@ -68,7 +73,8 @@ func settingsFields() []field {
 			},
 		},
 		{
-			label: i18n.T("ui.field.service"), kind: fieldChoice, choices: llm.PresetIDs(),
+			section: i18n.T("ui.section.service"),
+			label:   i18n.T("ui.field.service"), kind: fieldChoice, choices: llm.PresetIDs(),
 			help: i18n.T("ui.field.service.help"),
 			get:  func(c config.Config) string { return c.Provider },
 			set: func(c *config.Config, v string) error {
@@ -89,31 +95,43 @@ func settingsFields() []field {
 			},
 		},
 		{
-			label: i18n.T("ui.field.model"), kind: fieldText,
+			section: i18n.T("ui.section.service"),
+			label:   i18n.T("ui.field.model"), kind: fieldText,
 			help: i18n.T("ui.field.model.help"),
 			get:  func(c config.Config) string { return c.Model },
 			set:  func(c *config.Config, v string) error { c.Model = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: i18n.T("ui.field.effort"), kind: fieldChoice, choices: config.Efforts, only: llm.KindAnthropic,
-			help: i18n.T("ui.field.effort.help"),
-			get:  func(c config.Config) string { return c.Effort },
-			set:  func(c *config.Config, v string) error { c.Effort = v; return nil },
-		},
-		{
-			label: i18n.T("ui.field.base-url"), kind: fieldText,
+			section: i18n.T("ui.section.service"),
+			label:   i18n.T("ui.field.base-url"), kind: fieldText,
 			help: i18n.T("ui.field.base-url.help"),
 			get:  func(c config.Config) string { return c.BaseURL },
 			set:  func(c *config.Config, v string) error { c.BaseURL = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: i18n.T("ui.field.api-key"), kind: fieldText, secret: true,
+			section: i18n.T("ui.section.service"),
+			label:   i18n.T("ui.field.api-key"), kind: fieldText, secret: true,
 			help: i18n.T("ui.field.api-key.help"),
 			get:  func(c config.Config) string { return c.KeyStatus() },
 			set:  func(c *config.Config, v string) error { c.APIKey = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: i18n.T("ui.field.target-language"), kind: fieldChoice, choices: languageNames(),
+			section: i18n.T("ui.section.service"),
+			label:   i18n.T("ui.field.effort"), kind: fieldChoice, choices: config.Efforts, only: llm.KindAnthropic,
+			help: i18n.T("ui.field.effort.help"),
+			get:  func(c config.Config) string { return c.Effort },
+			set:  func(c *config.Config, v string) error { c.Effort = v; return nil },
+		},
+		{
+			section: i18n.T("ui.section.service"),
+			label:   i18n.T("ui.field.structured"), kind: fieldBool,
+			help: i18n.T("ui.field.structured.help"),
+			get:  func(c config.Config) string { return boolLabel(c.StructuredOutput) },
+			set:  setBool(func(c *config.Config, b bool) { c.StructuredOutput = b }),
+		},
+		{
+			section: i18n.T("ui.section.languages"),
+			label:   i18n.T("ui.field.target-language"), kind: fieldChoice, choices: languageNames(),
 			help: i18n.T("ui.field.target-language.help"),
 			get:  func(c config.Config) string { return c.TargetLanguage },
 			set: func(c *config.Config, v string) error {
@@ -125,112 +143,130 @@ func settingsFields() []field {
 			},
 		},
 		{
-			label: i18n.T("ui.field.language-code"), kind: fieldText,
+			section: i18n.T("ui.section.languages"),
+			label:   i18n.T("ui.field.language-code"), kind: fieldText,
 			help: i18n.T("ui.field.language-code.help"),
 			get:  func(c config.Config) string { return c.TargetCode },
 			set:  func(c *config.Config, v string) error { c.TargetCode = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: i18n.T("ui.field.source-language"), kind: fieldText,
+			section: i18n.T("ui.section.languages"),
+			label:   i18n.T("ui.field.source-language"), kind: fieldText,
 			help: i18n.T("ui.field.source-language.help"),
 			get:  func(c config.Config) string { return c.SourceLanguage },
 			set:  func(c *config.Config, v string) error { c.SourceLanguage = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: i18n.T("ui.field.source-code"), kind: fieldText,
+			section: i18n.T("ui.section.languages"),
+			label:   i18n.T("ui.field.source-code"), kind: fieldText,
 			help: i18n.T("ui.field.source-code.help"),
 			get:  func(c config.Config) string { return c.SourceCode },
 			set:  func(c *config.Config, v string) error { c.SourceCode = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: i18n.T("ui.field.titles"), kind: fieldBool,
+			section: i18n.T("ui.section.translation"),
+			label:   i18n.T("ui.field.titles"), kind: fieldBool,
 			help: i18n.T("ui.field.titles.help"),
 			get:  func(c config.Config) string { return boolLabel(c.TranslateTitles) },
 			set:  setBool(func(c *config.Config, b bool) { c.TranslateTitles = b }),
 		},
 		{
-			label: i18n.T("ui.field.chunk"), kind: fieldInt,
-			help: i18n.T("ui.field.chunk.help"),
-			get:  func(c config.Config) string { return strconv.Itoa(c.ChunkChars) },
-			set:  setInt(func(c *config.Config, n int) { c.ChunkChars = n }, 200, 200000),
-		},
-		{
-			label: i18n.T("ui.field.max-segments"), kind: fieldInt,
-			help: i18n.T("ui.field.max-segments.help"),
-			get:  func(c config.Config) string { return strconv.Itoa(c.MaxSegments) },
-			set:  setInt(func(c *config.Config, n int) { c.MaxSegments = n }, 1, 500),
-		},
-		{
-			label: i18n.T("ui.field.max-tokens"), kind: fieldInt,
-			help: i18n.T("ui.field.max-tokens.help"),
-			get:  func(c config.Config) string { return strconv.FormatInt(c.MaxTokens, 10) },
-			set:  setInt(func(c *config.Config, n int) { c.MaxTokens = int64(n) }, 512, 200000),
-		},
-		{
-			label: i18n.T("ui.field.attempts"), kind: fieldInt,
-			help: i18n.T("ui.field.attempts.help"),
-			get:  func(c config.Config) string { return strconv.Itoa(c.Attempts) },
-			set:  setInt(func(c *config.Config, n int) { c.Attempts = n }, 1, 12),
-		},
-		{
-			label: i18n.T("ui.field.timeout"), kind: fieldInt,
-			help: i18n.T("ui.field.timeout.help"),
-			get:  func(c config.Config) string { return strconv.Itoa(c.TimeoutSeconds) },
-			set:  setInt(func(c *config.Config, n int) { c.TimeoutSeconds = n }, 5, 3600),
-		},
-		{
-			label: i18n.T("ui.field.context"), kind: fieldInt,
-			help: i18n.T("ui.field.context.help"),
-			get:  func(c config.Config) string { return strconv.Itoa(c.ContextChars) },
-			set:  setInt(func(c *config.Config, n int) { c.ContextChars = n }, 0, 4000),
-		},
-		{
-			label: i18n.T("ui.field.structured"), kind: fieldBool,
-			help: i18n.T("ui.field.structured.help"),
-			get:  func(c config.Config) string { return boolLabel(c.StructuredOutput) },
-			set:  setBool(func(c *config.Config, b bool) { c.StructuredOutput = b }),
-		},
-		{
-			label: i18n.T("ui.field.salvage"), kind: fieldBool,
-			help: i18n.T("ui.field.salvage.help"),
-			get:  func(c config.Config) string { return boolLabel(c.SalvagePass) },
-			set:  setBool(func(c *config.Config, b bool) { c.SalvagePass = b }),
-		},
-		{
-			label: i18n.T("ui.field.resume"), kind: fieldBool,
-			help: i18n.T("ui.field.resume.help"),
-			get:  func(c config.Config) string { return boolLabel(c.Resume) },
-			set:  setBool(func(c *config.Config, b bool) { c.Resume = b }),
-		},
-		{
-			label: i18n.T("ui.field.format"), kind: fieldChoice, choices: config.Formats,
-			help: i18n.T("ui.field.format.help"),
-			get:  func(c config.Config) string { return c.Format },
-			set:  func(c *config.Config, v string) error { c.Format = v; return nil },
-		},
-		{
-			label: i18n.T("ui.field.output-dir"), kind: fieldText,
-			help: i18n.T("ui.field.output-dir.help"),
-			get:  func(c config.Config) string { return c.OutputDir },
-			set:  func(c *config.Config, v string) error { c.OutputDir = strings.TrimSpace(v); return nil },
-		},
-		{
-			label: i18n.T("ui.field.about"), kind: fieldText,
+			section: i18n.T("ui.section.translation"),
+			label:   i18n.T("ui.field.about"), kind: fieldText,
 			help: i18n.T("ui.field.about.help"),
 			get:  func(c config.Config) string { return oneLine(c.About) },
 			set:  func(c *config.Config, v string) error { c.About = strings.TrimSpace(v); return nil },
 		},
 		{
-			label: i18n.T("ui.field.glossary"), kind: fieldText,
+			section: i18n.T("ui.section.translation"),
+			label:   i18n.T("ui.field.glossary"), kind: fieldText,
 			help: i18n.T("ui.field.glossary.help", config.Path()),
 			get:  func(c config.Config) string { return oneLine(c.Glossary) },
 			set:  func(c *config.Config, v string) error { c.Glossary = v; return nil },
 		},
 		{
-			label: i18n.T("ui.field.style"), kind: fieldText,
+			section: i18n.T("ui.section.translation"),
+			label:   i18n.T("ui.field.style"), kind: fieldText,
 			help: i18n.T("ui.field.style.help"),
 			get:  func(c config.Config) string { return oneLine(c.StyleNotes) },
 			set:  func(c *config.Config, v string) error { c.StyleNotes = v; return nil },
+		},
+		{
+			section: i18n.T("ui.section.translation"),
+			label:   i18n.T("ui.field.context"), kind: fieldInt,
+			help: i18n.T("ui.field.context.help"),
+			get:  func(c config.Config) string { return strconv.Itoa(c.ContextChars) },
+			set:  setInt(func(c *config.Config, n int) { c.ContextChars = n }, 0, 4000),
+		},
+		{
+			section: i18n.T("ui.section.requests"),
+			label:   i18n.T("ui.field.chunk"), kind: fieldInt,
+			help: i18n.T("ui.field.chunk.help"),
+			get:  func(c config.Config) string { return strconv.Itoa(c.ChunkChars) },
+			set:  setInt(func(c *config.Config, n int) { c.ChunkChars = n }, 200, 200000),
+		},
+		{
+			section: i18n.T("ui.section.requests"),
+			label:   i18n.T("ui.field.max-segments"), kind: fieldInt,
+			help: i18n.T("ui.field.max-segments.help"),
+			get:  func(c config.Config) string { return strconv.Itoa(c.MaxSegments) },
+			set:  setInt(func(c *config.Config, n int) { c.MaxSegments = n }, 1, 500),
+		},
+		{
+			section: i18n.T("ui.section.requests"),
+			label:   i18n.T("ui.field.max-tokens"), kind: fieldInt,
+			help: i18n.T("ui.field.max-tokens.help"),
+			get:  func(c config.Config) string { return strconv.FormatInt(c.MaxTokens, 10) },
+			set:  setInt(func(c *config.Config, n int) { c.MaxTokens = int64(n) }, 512, 200000),
+		},
+		{
+			section: i18n.T("ui.section.requests"),
+			label:   i18n.T("ui.field.attempts"), kind: fieldInt,
+			help: i18n.T("ui.field.attempts.help"),
+			get:  func(c config.Config) string { return strconv.Itoa(c.Attempts) },
+			set:  setInt(func(c *config.Config, n int) { c.Attempts = n }, 1, 12),
+		},
+		{
+			section: i18n.T("ui.section.requests"),
+			label:   i18n.T("ui.field.rpm"), kind: fieldInt,
+			help: i18n.T("ui.field.rpm.help"),
+			get:  func(c config.Config) string { return strconv.Itoa(c.RequestsPerMinute) },
+			set:  setInt(func(c *config.Config, n int) { c.RequestsPerMinute = n }, 0, 10000),
+		},
+		{
+			section: i18n.T("ui.section.requests"),
+			label:   i18n.T("ui.field.timeout"), kind: fieldInt,
+			help: i18n.T("ui.field.timeout.help"),
+			get:  func(c config.Config) string { return strconv.Itoa(c.TimeoutSeconds) },
+			set:  setInt(func(c *config.Config, n int) { c.TimeoutSeconds = n }, 5, 3600),
+		},
+		{
+			section: i18n.T("ui.section.recovery"),
+			label:   i18n.T("ui.field.resume"), kind: fieldBool,
+			help: i18n.T("ui.field.resume.help"),
+			get:  func(c config.Config) string { return boolLabel(c.Resume) },
+			set:  setBool(func(c *config.Config, b bool) { c.Resume = b }),
+		},
+		{
+			section: i18n.T("ui.section.recovery"),
+			label:   i18n.T("ui.field.salvage"), kind: fieldBool,
+			help: i18n.T("ui.field.salvage.help"),
+			get:  func(c config.Config) string { return boolLabel(c.SalvagePass) },
+			set:  setBool(func(c *config.Config, b bool) { c.SalvagePass = b }),
+		},
+		{
+			section: i18n.T("ui.section.output"),
+			label:   i18n.T("ui.field.format"), kind: fieldChoice, choices: config.Formats,
+			help: i18n.T("ui.field.format.help"),
+			get:  func(c config.Config) string { return c.Format },
+			set:  func(c *config.Config, v string) error { c.Format = v; return nil },
+		},
+		{
+			section: i18n.T("ui.section.output"),
+			label:   i18n.T("ui.field.output-dir"), kind: fieldText,
+			help: i18n.T("ui.field.output-dir.help"),
+			get:  func(c config.Config) string { return c.OutputDir },
+			set:  func(c *config.Config, v string) error { c.OutputDir = strings.TrimSpace(v); return nil },
 		},
 	}
 }
@@ -288,6 +324,45 @@ func (f settingsForm) labelColumn() int {
 		}
 	}
 	return w + 2
+}
+
+// settingsRow is one line of the settings list: either a section heading or a
+// field. Building the two into a single list is what keeps the headings inside
+// the window's budget — a heading drawn outside it is a line the screen did not
+// count, and the bottom goes missing again.
+type settingsRows []settingsRow
+
+type settingsRow struct {
+	heading string
+	// field indexes into visible(), or is -1 for a heading.
+	field int
+}
+
+// listRows lays the visible fields out with a heading above each group. A
+// section whose every field is hidden — effort, outside Anthropic — takes no
+// heading either: a title with nothing under it reads as a bug.
+func (f settingsForm) listRows() settingsRows {
+	var rows settingsRows
+	section := ""
+	for i, idx := range f.visible() {
+		if fd := f.fields[idx]; fd.section != section {
+			section = fd.section
+			rows = append(rows, settingsRow{heading: section, field: -1})
+		}
+		rows = append(rows, settingsRow{field: i})
+	}
+	return rows
+}
+
+// rowOf finds the line a visible field sits on, which is where the window has
+// to be centred.
+func (rows settingsRows) rowOf(field int) int {
+	for i, r := range rows {
+		if r.field == field {
+			return i
+		}
+	}
+	return 0
 }
 
 // visible returns the indices of the fields that apply to the current provider.
@@ -449,16 +524,23 @@ func (m Model) viewSettings() string {
 		foot = m.settingsFoot(false)
 		rows = m.rows() - lipgloss.Height(head) - lipgloss.Height(foot)
 	}
-	start, end := window(f.index, len(vis), max(minListRows, rows))
+	// The window runs over rows rather than fields, so a heading costs a line
+	// like anything else and the count above stays true.
+	list := f.listRows()
+	start, end := window(list.rowOf(f.index), len(list), max(minListRows, rows))
 
 	var b strings.Builder
 	b.WriteString(head)
 	if start > 0 {
-		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-above", start)) + "\n")
+		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-above", countFields(list[:start]))) + "\n")
 	}
-	for i := start; i < end; i++ {
-		fd := f.fields[vis[i]]
-		selected := i == f.index
+	for _, row := range list[start:end] {
+		if row.field < 0 {
+			b.WriteString(sectionStyle.Render(row.heading) + "\n")
+			continue
+		}
+		fd := f.fields[vis[row.field]]
+		selected := row.field == f.index
 		value := fd.get(f.cfg)
 		if fd.kind == fieldChoice || fd.kind == fieldBool {
 			value = "‹ " + value + " ›"
@@ -478,11 +560,24 @@ func (m Model) viewSettings() string {
 		}
 		b.WriteString(prefix + labelSt.Render(pad(fd.label, column)) + valueStyle.Render(value) + "\n")
 	}
-	if end < len(vis) {
-		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-below", len(vis)-end)) + "\n")
+	if end < len(list) {
+		b.WriteString(dimStyle.Render(i18n.T("ui.list.more-below", countFields(list[end:]))) + "\n")
 	}
 	b.WriteString(foot)
 	return b.String()
+}
+
+// countFields counts the settings in a stretch of rows, ignoring the headings.
+// "12 more below" has to mean twelve settings: counting the titles too would
+// promise more than the list holds.
+func countFields(rows settingsRows) int {
+	n := 0
+	for _, r := range rows {
+		if r.field >= 0 {
+			n++
+		}
+	}
+	return n
 }
 
 // settingsFoot is everything below the list: the help of the selected field,
