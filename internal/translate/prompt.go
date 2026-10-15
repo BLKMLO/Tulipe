@@ -38,6 +38,7 @@ func (t *translator) systemPrompt() string {
 	fmt.Fprintf(&b, "6. Preserve the register, tone and rhythm of the source, and apply the typographic conventions of %s (quotation marks, spacing, dashes, capitalisation).\n", target)
 	b.WriteString("7. Return a segment unchanged when it holds nothing translatable.\n")
 	b.WriteString("8. Answer with the JSON object alone: no preamble, no commentary, no code fence.\n")
+	b.WriteString("9. If you feel the need to flag something — a quotation you deliberately left in the source language, a term you could not resolve, an ambiguity — never write it into a translation string, never add an array element for it, and never write it outside the JSON object: any of those is read as a corrupt answer and the passage is thrown away. Put it in the optional \"notes\" field instead: {\"translations\": [...], \"notes\": [\"...\"]}. Nothing obliges you to use it; unless the remark genuinely matters to the reader, leave it out entirely. Refuse the batch only if you truly cannot translate it.\n")
 
 	if g := strings.TrimSpace(t.opts.Glossary); g != "" {
 		b.WriteString("\nGlossary — these renderings are mandatory and must stay consistent throughout the book:\n")
@@ -55,7 +56,7 @@ func (t *translator) systemPrompt() string {
 	// It restates the three the first answer most often broke, because the
 	// batch it is about to see is one that already came back unusable.
 	if t.opts.Salvage {
-		b.WriteString("\nThis batch was sent once already and the answer could not be used. Before answering, check three things: the array holds exactly one string per input segment, every tag and entity is reproduced character for character, and the reply is the JSON object and nothing else.\n")
+		b.WriteString("\nThis batch was sent once already and the answer could not be used. Before answering, check three things: the array holds exactly one string per input segment, every tag and entity is reproduced character for character, and the reply is the JSON object and nothing else — any remark belongs in \"notes\", nowhere else.\n")
 	}
 	return b.String()
 }
@@ -107,24 +108,41 @@ func encodeSegments(segments []string) (string, error) {
 
 type translationEnvelope struct {
 	Translations []string `json:"translations"`
+	// Notes is the sanctioned place for a remark the model wants to pass on —
+	// a quotation it left in the source language, a term it could not settle.
+	// Giving it a field of its own is what keeps such a remark out of the
+	// translations themselves, where it used to turn a perfectly good answer
+	// into a rejected one.
+	Notes []string `json:"notes"`
+}
+
+// answer is one usable reply: the translations, plus whatever the model asked
+// to pass on alongside them. The remarks never gate acceptance — they are
+// shown to the reader and nothing more.
+type answer struct {
+	Translations []string
+	Remarks      []string
 }
 
 // parseTranslations reads the model's answer. Structured output gives a clean
 // object; without it a model may still wrap the JSON in a code fence or a
 // sentence, so the payload is located before parsing.
-func parseTranslations(text string) ([]string, error) {
+//
+// A "notes" field is read and handed back as remarks. It is never required,
+// and its absence is the ordinary case.
+func parseTranslations(text string) (answer, error) {
 	trimmed := strings.TrimSpace(text)
 	if trimmed == "" {
-		return nil, errors.New(i18n.T("translate.err.empty-answer"))
+		return answer{}, errors.New(i18n.T("translate.err.empty-answer"))
 	}
 
 	var env translationEnvelope
 	if err := json.Unmarshal([]byte(trimmed), &env); err == nil && env.Translations != nil {
-		return env.Translations, nil
+		return env.answer(), nil
 	}
 	var bare []string
 	if err := json.Unmarshal([]byte(trimmed), &bare); err == nil {
-		return bare, nil
+		return answer{Translations: bare}, nil
 	}
 
 	stripped := stripCodeFence(trimmed)
@@ -134,16 +152,49 @@ func parseTranslations(text string) ([]string, error) {
 	if inner, ok := slice(trimmed, '{', '}'); ok {
 		var env translationEnvelope
 		if err := json.Unmarshal([]byte(inner), &env); err == nil && env.Translations != nil {
-			return env.Translations, nil
+			return env.answer(), nil
 		}
 	}
 	if inner, ok := slice(trimmed, '[', ']'); ok {
 		var bare []string
 		if err := json.Unmarshal([]byte(inner), &bare); err == nil {
-			return bare, nil
+			return answer{Translations: bare}, nil
 		}
 	}
-	return nil, fmt.Errorf(i18n.T("translate.err.not-json"), excerpt(trimmed))
+	return answer{}, fmt.Errorf(i18n.T("translate.err.not-json"), excerpt(trimmed))
+}
+
+// maxRemarks caps how many remarks one answer can carry, and remarkChars how
+// long each one may be. A model that decides to comment on every paragraph
+// must not be able to bury the report it is meant to inform.
+const (
+	maxRemarks  = 3
+	remarkChars = 200
+)
+
+// answer turns the envelope into one reply, bounding the remarks on the way.
+func (e translationEnvelope) answer() answer {
+	a := answer{Translations: e.Translations}
+	for _, r := range e.Notes {
+		r = strings.TrimSpace(strings.Join(strings.Fields(r), " "))
+		if r == "" {
+			continue
+		}
+		if len(a.Remarks) == maxRemarks {
+			break
+		}
+		a.Remarks = append(a.Remarks, firstRunes(r, remarkChars))
+	}
+	return a
+}
+
+// firstRunes cuts a string to at most n runes, on a rune boundary.
+func firstRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return strings.TrimSpace(string(r[:n])) + "\u2026"
 }
 
 func stripCodeFence(s string) string {

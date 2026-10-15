@@ -262,6 +262,11 @@ func docLine(d translate.DocState, current bool, spin string) string {
 	} else if d.Notes > 0 {
 		line += warnStyle.Render(fmt.Sprintf("  ⚑ %d", d.Notes))
 	}
+	// A remark is not a warning: the chapter is translated. It gets a quieter
+	// mark of its own so the flag keeps meaning "something was not translated".
+	if d.Remarks > 0 {
+		line += dimStyle.Render(fmt.Sprintf("  ✎ %d", d.Remarks))
+	}
 	return line
 }
 
@@ -315,12 +320,28 @@ func (m Model) viewReport() string {
 		}
 	}
 
-	if n := len(m.result.Notes); n > 0 {
+	if problems := m.result.Problems(); len(problems) > 0 {
+		n := len(problems)
 		b.WriteString("\n\n" + warnStyle.Render(i18n.T("ui.report.notes", n)) +
 			dimStyle.Render(i18n.T("ui.report.notes.detail")) + "\n")
-		for i, note := range m.result.Notes {
+		for i, note := range problems {
 			if i == 8 {
 				b.WriteString(dimStyle.Render(i18n.T("ui.book.and-more", n-8)))
+				break
+			}
+			b.WriteString(dimStyle.Render("  " + truncate(note.String(), 100) + "\n"))
+		}
+	}
+
+	// The model's own remarks sit apart, and say so: they report nothing that
+	// went wrong, so mixing them in would inflate the count of problems.
+	if remarks := m.result.Remarks(); len(remarks) > 0 {
+		n := len(remarks)
+		b.WriteString("\n\n" + accentStyle.Render(i18n.T("ui.report.remarks", n)) +
+			dimStyle.Render(i18n.T("ui.report.remarks.detail")) + "\n")
+		for i, note := range remarks {
+			if i == 5 {
+				b.WriteString(dimStyle.Render(i18n.T("ui.book.and-more", n-5)))
 				break
 			}
 			b.WriteString(dimStyle.Render("  " + truncate(note.String(), 100) + "\n"))
