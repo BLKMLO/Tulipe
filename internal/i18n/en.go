@@ -100,6 +100,7 @@ var messagesEN = map[string]string{
 	"translate.note.markup-in-text":    "markup was introduced into plain text; source kept",
 	"translate.note.too-long":          "translation %d times longer than the source; source kept",
 	"translate.note.markup-changed":    "markup changed: source %v, translation %v",
+	"translate.note.model-remark":      "remark from the model: %s",
 	"translate.msg.rate-limit":         "waiting %s to stay under %d requests per minute",
 	"translate.msg.salvage":            "second attempt at %d passage(s)",
 	"translate.note.salvaged":          "%d of %d flagged passage(s) recovered on the second attempt",
@@ -217,6 +218,8 @@ var messagesEN = map[string]string{
 	"ui.report.failed.detail":   " — they appear in the source language in the file produced",
 	"ui.report.notes":           "⚑ %d passage(s) reported",
 	"ui.report.notes.detail":    " — the source text was kept wherever the translation was unusable",
+	"ui.report.remarks":         "✎ %d remark(s) from the model",
+	"ui.report.remarks.detail":  " — nothing was rejected; these translations were kept",
 
 	// -- internal/ui: figures --------------------------------------------
 	"ui.usage.no-call":              "no call",
@@ -330,7 +333,8 @@ var messagesEN = map[string]string{
 	"cli.headless.requests":   "requests  %s",
 	"cli.headless.tokens":     "tokens    %s",
 	"cli.headless.duration":   "duration  %s",
-	"cli.headless.notes":      "reported  %d note(s) from this run:",
+	"cli.headless.notes":      "reported  %d problem(s) from this run:",
+	"cli.headless.remarks":    "remarks   %d from the model, nothing was rejected:",
 	"cli.headless.notes.item": "          %s",
 	"cli.headless.notes.more": "          … and %d more",
 	"cli.headless.err.failed": "%d document(s) not translated, the file produced holds them in the source language: %s",

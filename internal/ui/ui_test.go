@@ -547,3 +547,33 @@ func TestSettingsLabelsNeverTouchTheirValues(t *testing.T) {
 		}
 	}
 }
+
+// A remark from the model is not a problem: the report counts and shows the
+// two apart, and a book that only collected remarks offers no retry.
+func TestTheReportKeepsRemarksApartFromProblems(t *testing.T) {
+	m := newTestModel()
+	m.result = &translate.Result{
+		Documents: []translate.DocState{
+			{Title: "I", Status: translate.StatusDone, Translated: 42, TotalSegments: 42, Remarks: 1},
+		},
+		Notes: []translate.Note{
+			{Document: "a.xhtml", Segment: 3, Message: "balisage mal formé"},
+			{Document: "a.xhtml", Segment: -1, Message: "remark from the model: citation gardée", Remark: true},
+		},
+	}
+	m.screen = screenReport
+
+	view := m.View()
+	if !strings.Contains(view, "1 passage(s) reported") {
+		t.Errorf("une remarque ne doit pas être comptée comme un passage signalé :\n%s", view)
+	}
+	if !strings.Contains(view, "1 remark(s) from the model") {
+		t.Errorf("la remarque du modèle doit apparaître à part :\n%s", view)
+	}
+	if !strings.Contains(view, "citation gardée") {
+		t.Errorf("le texte de la remarque doit être lisible :\n%s", view)
+	}
+	if m.result.Retryable() {
+		t.Error("une remarque ne doit pas proposer de reprise")
+	}
+}

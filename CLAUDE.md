@@ -211,6 +211,40 @@ Dans `internal/translate` :
   ajouter aussi un test dans `translate_test.go`, sur le modèle de
   `TestBrokenMarkupIsRejected`.
 
+## La remarque du modèle
+
+Un traducteur a parfois quelque chose à dire plutôt qu'à refuser : une citation
+laissée en langue source à dessein, un terme sans équivalent arrêté. Écrite
+dans la réponse elle-même, la remarque coûtait le lot entier — la réponse
+n'était plus le JSON attendu, et des paragraphes corrects repartaient en langue
+source.
+
+Le prompt (règle 9) nomme donc **un seul endroit** où une remarque peut aller :
+le champ facultatif `notes` de l'objet, déclaré dans `responseSchema` pour
+qu'un modèle tenu au schéma puisse l'emprunter. La règle dit aussi, et c'est le
+cœur du correctif, que **rien n'oblige à s'en servir** : sans remarque utile au
+lecteur, le modèle se tait ; un refus reste un refus.
+
+Trois choses à ne pas défaire :
+
+- **Une remarque n'assouplit aucun contrôle.** `accept` est inchangé, le
+  nombre de traductions est toujours exigé exact. Deviner lequel des éléments
+  d'un tableau trop long est la remarque décalerait tous les paragraphes
+  suivants : on ne devine pas, on offre un champ.
+- **Une remarque n'est pas un problème.** Elle produit une `Note` avec
+  `Remark` à vrai, `Segment` à -1, jamais d'entrée dans `Pending`, et ne
+  change pas le code de sortie. `Result.Problems()` et `Result.Remarks()`
+  séparent les deux listes ; le rapport affiche `⚑` pour ce qui n'a pas été
+  traduit et `✎` pour ce que le modèle a dit. Les mélanger annoncerait des
+  problèmes là où il n'y en a pas — exactement l'inverse de ce que ce
+  correctif répare.
+- **Elles sont bornées.** `maxRemarks` par réponse, `remarkChars` par
+  remarque, `maxDocRemarks` par document, et une même phrase n'est retenue
+  qu'une fois (`translator.seenRemarks`). Un modèle qui commente chaque lot
+  ne doit pas noyer le rapport qu'il est censé renseigner. Elles ne sont
+  enregistrées qu'une fois la réponse jugée exploitable : le commentaire d'une
+  réponse jetée parle de ce que personne ne lira.
+
 ## Le limiteur de débit
 
 `limiter.go` espace les requêtes pour qu'un livre reste sous le quota d'un

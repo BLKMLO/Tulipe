@@ -146,9 +146,23 @@ func RunHeadless(ctx context.Context, cfg config.Config, source string, o Headle
 	log(i18n.T("cli.headless.requests"), requestsPlain(res.Requests, res.Attempted, res.Cached()))
 	log(i18n.T("cli.headless.tokens"), usagePlain(res.Usage, res.Attempted))
 	log(i18n.T("cli.headless.duration"), res.Duration.Round(time.Second))
-	if n := len(res.Notes); n > 0 {
+	if problems := res.Problems(); len(problems) > 0 {
+		n := len(problems)
 		log(i18n.T("cli.headless.notes"), n)
-		for i, note := range res.Notes {
+		for i, note := range problems {
+			if i == 20 {
+				log(i18n.T("cli.headless.notes.more"), n-20)
+				break
+			}
+			log(i18n.T("cli.headless.notes.item", note))
+		}
+	}
+	// Listed apart from the problems: a remark means the translation was kept,
+	// and the exit status does not change because of one.
+	if remarks := res.Remarks(); len(remarks) > 0 {
+		n := len(remarks)
+		log(i18n.T("cli.headless.remarks"), n)
+		for i, note := range remarks {
 			if i == 20 {
 				log(i18n.T("cli.headless.notes.more"), n-20)
 				break

@@ -106,7 +106,9 @@ func salvage(ctx context.Context, p llm.Provider, book replacer, jobs []salvageJ
 			res.Requests += out.Requests
 			res.Attempted += out.Attempted
 			res.Notes = append(res.Notes, out.Notes...)
-			res.Documents[i].Notes += len(out.Notes)
+			problems, remarks := countNotes(out.Notes)
+			res.Documents[i].Notes += problems
+			res.Documents[i].Remarks += remarks
 		}
 		if err != nil {
 			// The first pass produced a readable chapter. Losing it over a

@@ -194,6 +194,11 @@ type Note struct {
 	// cannot share it: docNote builds the second kind.
 	Segment int
 	Message string
+	// Remark marks a note the model asked to pass on rather than a problem
+	// Tulipe had to work around. Nothing was rejected and nothing is pending:
+	// the translation was kept. The two are counted and shown apart, because
+	// a remark that reads like a failure is a false alarm.
+	Remark bool
 }
 
 // docNote is a note about a whole document rather than one of its paragraphs.
@@ -325,6 +330,11 @@ type translator struct {
 	// is nil for a full pass, where the two coincide.
 	numbers  []int
 	abortErr error // set when the guard trips; stops the whole document
+
+	// seenRemarks and remarks bound what the model's own notes can add to the
+	// report: one entry per distinct sentence, maxDocRemarks per document.
+	seenRemarks map[string]bool
+	remarks     int
 }
 
 func (t *translator) emit(msg string, retry *llm.RetryNotice) {
@@ -367,6 +377,33 @@ func (t *translator) keep(idx int, msg string) {
 	t.note(idx, msg)
 	t.res.Pending = append(t.res.Pending, t.segmentNumber(idx))
 }
+
+// remark records something the model asked to pass on. It is deliberately not
+// a problem: the translation it came with was accepted, so the note carries no
+// segment number, never feeds the pending list, and never prefixes itself with
+// "second attempt" — it is new information either way.
+//
+// Identical remarks are recorded once per document, and the document's total
+// is capped: a model that comments on every chunk must not drown the report.
+func (t *translator) remark(text string) {
+	if text == "" || t.remarks >= maxDocRemarks {
+		return
+	}
+	if t.seenRemarks == nil {
+		t.seenRemarks = make(map[string]bool)
+	}
+	if t.seenRemarks[text] {
+		return
+	}
+	t.seenRemarks[text] = true
+	t.remarks++
+	n := docNote(t.name, i18n.T("translate.note.model-remark", text))
+	n.Remark = true
+	t.res.Notes = append(t.res.Notes, n)
+}
+
+// maxDocRemarks caps the remarks one document can contribute to the report.
+const maxDocRemarks = 6
 
 // segmentNumber maps an index in t.segs back to its position in the whole
 // document. They differ during a retry pass, which works on a subset.
@@ -592,14 +629,21 @@ func (t *translator) requestPrompt(sources []string, splittable bool) ([]string,
 			return nil, t.guard(err)
 		}
 		parsed, err := parseTranslations(resp.Text)
-		if err == nil && len(parsed) != len(sources) {
-			err = fmt.Errorf(i18n.T("translate.err.count"), len(parsed), len(sources))
+		if err == nil && len(parsed.Translations) != len(sources) {
+			err = fmt.Errorf(i18n.T("translate.err.count"),
+				len(parsed.Translations), len(sources))
 		}
 		if err == nil {
+			// The remarks are recorded only once the answer is usable: a
+			// discarded answer's commentary is about nothing the reader will
+			// ever see.
+			for _, r := range parsed.Remarks {
+				t.remark(r)
+			}
 			t.res.Requests++
 			t.opts.failures.success()
 			t.emit("", nil)
-			return parsed, nil
+			return parsed.Translations, nil
 		}
 		lastErr = err
 		if attempt < answerAttempts {
@@ -690,6 +734,13 @@ var responseSchema = map[string]any{
 	"type": "object",
 	"properties": map[string]any{
 		"translations": map[string]any{
+			"type":  "array",
+			"items": map[string]any{"type": "string"},
+		},
+		// Declared so a model held to the schema still has somewhere to put a
+		// remark. Without a field of its own the remark lands in a
+		// translation or beside the object, and the whole batch is rejected.
+		"notes": map[string]any{
 			"type":  "array",
 			"items": map[string]any{"type": "string"},
 		},

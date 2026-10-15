@@ -35,8 +35,13 @@ type DocState struct {
 	Translated int
 	// Pending is how many passages of this document are still in the source
 	// language, and could be retried.
-	Pending  int
+	Pending int
+	// Notes is how many problems this document reported, and Remarks how many
+	// comments the model passed on. They are kept apart on purpose: a remark
+	// means the translation was kept, so showing it under the same flag as a
+	// rejected passage would raise a false alarm.
 	Notes    int
+	Remarks  int
 	Err      error
 	Duration time.Duration
 }
@@ -62,6 +67,37 @@ type Result struct {
 	Attempted int
 	Notes     []Note
 	Duration  time.Duration
+}
+
+// Problems returns the notes about something Tulipe had to work around. These
+// are the ones that mean a passage was not translated as asked.
+func (r *Result) Problems() []Note { return selectNotes(r.Notes, false) }
+
+// Remarks returns the notes the model itself asked to pass on. Nothing was
+// rejected because of them.
+func (r *Result) Remarks() []Note { return selectNotes(r.Notes, true) }
+
+func selectNotes(notes []Note, remark bool) []Note {
+	var out []Note
+	for _, n := range notes {
+		if n.Remark == remark {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// countNotes splits a document's notes the same way, for the per-document
+// counters shown next to a chapter.
+func countNotes(notes []Note) (problems, remarks int) {
+	for _, n := range notes {
+		if n.Remark {
+			remarks++
+			continue
+		}
+		problems++
+	}
+	return problems, remarks
 }
 
 // Segments totals the translatable segments of the run and how many of them
@@ -277,7 +313,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 					res.Requests += out.Requests
 					res.Attempted += out.Attempted
 					res.Notes = append(res.Notes, out.Notes...)
-					res.Documents[i].Notes = len(out.Notes)
+					res.Documents[i].Notes, res.Documents[i].Remarks = countNotes(out.Notes)
 				}
 				if err != nil {
 					// The earlier translation is still good: keep it rather
@@ -338,7 +374,7 @@ func Book(ctx context.Context, p llm.Provider, book *epub.Book, opts BookOptions
 			res.Requests += out.Requests
 			res.Attempted += out.Attempted
 			res.Notes = append(res.Notes, out.Notes...)
-			res.Documents[i].Notes = len(out.Notes)
+			res.Documents[i].Notes, res.Documents[i].Remarks = countNotes(out.Notes)
 		}
 
 		if err != nil {

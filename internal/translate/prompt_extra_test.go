@@ -2,6 +2,7 @@ package translate
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -46,5 +47,67 @@ func TestAboutIsOnlyPresentWhenItIsSet(t *testing.T) {
 	base.About = "   \n  "
 	if strings.Contains((&translator{opts: base}).systemPrompt(), "What this book is") {
 		t.Error("une phrase vide ne doit rien ajouter au prompt")
+	}
+}
+
+// A model that wants to flag something — a quotation it left in the source
+// language, say — used to put the remark inside the answer, which cost the
+// whole batch. The prompt now names the one place a remark may go, and the
+// schema declares it.
+func TestThePromptNamesWhereARemarkGoes(t *testing.T) {
+	sys := (&translator{opts: Options{TargetLanguage: "français"}.Defaults()}).systemPrompt()
+	for _, want := range []string{
+		`"notes"`,
+		"never add an array element for it",
+		"leave it out entirely",
+	} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("le prompt ne dit pas %q :\n%s", want, sys)
+		}
+	}
+	props, _ := responseSchema["properties"].(map[string]any)
+	if _, ok := props["notes"]; !ok {
+		t.Error("le schéma n'offre pas de champ notes : un modèle tenu au schéma n'a nulle part où écrire sa remarque")
+	}
+	// Only the translations are required: a remark is never obligatory.
+	if req, _ := responseSchema["required"].([]string); len(req) != 1 || req[0] != "translations" {
+		t.Errorf("required = %v, une remarque ne doit pas être exigée", responseSchema["required"])
+	}
+}
+
+func TestRemarksAreReadAndBounded(t *testing.T) {
+	got, err := parseTranslations(`{"translations":["a"],"notes":["  une  citation gardée en anglais ","","autre"]}`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Translations) != 1 || got.Translations[0] != "a" {
+		t.Errorf("translations = %q", got.Translations)
+	}
+	want := []string{"une citation gardée en anglais", "autre"}
+	if strings.Join(got.Remarks, "|") != strings.Join(want, "|") {
+		t.Errorf("remarks = %q, want %q", got.Remarks, want)
+	}
+
+	// A model that decides to comment at length must not be able to bury the
+	// report it is meant to inform.
+	many := make([]string, maxRemarks+3)
+	for i := range many {
+		many[i] = fmt.Sprintf("remarque %d %s", i, strings.Repeat("x", remarkChars+50))
+	}
+	data, err := json.Marshal(translationEnvelope{Translations: []string{"a"}, Notes: many})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err = parseTranslations(string(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Remarks) != maxRemarks {
+		t.Errorf("%d remarques retenues, want %d", len(got.Remarks), maxRemarks)
+	}
+	for _, r := range got.Remarks {
+		if n := len([]rune(r)); n > remarkChars+1 {
+			t.Errorf("remarque de %d runes, borne %d", n, remarkChars)
+		}
 	}
 }

@@ -261,8 +261,8 @@ func TestParseTranslations(t *testing.T) {
 			t.Errorf("parseTranslations(%q) = %v", c.in, err)
 			continue
 		}
-		if strings.Join(got, "|") != strings.Join(c.want, "|") {
-			t.Errorf("parseTranslations(%q) = %q, want %q", c.in, got, c.want)
+		if strings.Join(got.Translations, "|") != strings.Join(c.want, "|") {
+			t.Errorf("parseTranslations(%q) = %q, want %q", c.in, got.Translations, c.want)
 		}
 	}
 	for _, bad := range []string{"", "pas du json", "{}"} {
@@ -840,5 +840,88 @@ func TestWithoutALimitNothingWaits(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > time.Second {
 		t.Errorf("an unlimited run took %v", elapsed)
+	}
+}
+
+// A remark travelling with a good answer must cost nothing: every segment is
+// kept, nothing is pending, and the note says it is a remark so the report can
+// show it apart from the problems.
+func TestARemarkDoesNotCostTheBatch(t *testing.T) {
+	p := &fakeProvider{answer: func(_ int, s []string) (string, error) {
+		data, err := json.Marshal(translationEnvelope{
+			Translations: upper(s),
+			Notes:        []string{"« Mind the gap » gardé en anglais : c'est une citation."},
+		})
+		return string(data), err
+	}}
+	res, err := Document(context.Background(), p, Options{TargetLanguage: "français"},
+		DocMeta{}, "c1.xhtml", []byte(doc), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if res.Translated != res.Segments || res.Segments == 0 {
+		t.Fatalf("translated %d of %d segments", res.Translated, res.Segments)
+	}
+	if len(res.Pending) != 0 {
+		t.Errorf("une remarque ne doit rien laisser en attente : %v", res.Pending)
+	}
+	if len(res.Notes) != 1 {
+		t.Fatalf("notes = %v, want une seule", res.Notes)
+	}
+	n := res.Notes[0]
+	if !n.Remark {
+		t.Error("la note doit être marquée comme une remarque, pas comme un problème")
+	}
+	if n.Segment != -1 {
+		t.Errorf("Segment = %d, une remarque porte sur le lot, pas sur un paragraphe", n.Segment)
+	}
+	if !strings.Contains(n.Message, "Mind the gap") {
+		t.Errorf("la remarque n'est pas transmise : %q", n.Message)
+	}
+}
+
+// The same remark coming back chunk after chunk is recorded once, and a
+// document cannot contribute more than maxDocRemarks of them.
+func TestRemarksAreDeduplicatedAndCappedPerDocument(t *testing.T) {
+	var body strings.Builder
+	body.WriteString(`<html><body>`)
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&body, "<p>%s</p>", strings.Repeat("y", 200))
+	}
+	body.WriteString(`</body></html>`)
+
+	p := &fakeProvider{answer: func(call int, s []string) (string, error) {
+		data, err := json.Marshal(translationEnvelope{
+			Translations: upper(s),
+			// One sentence repeated by every chunk, plus one of its own.
+			Notes: []string{"toujours la même remarque", fmt.Sprintf("remarque du lot %d", call)},
+		})
+		return string(data), err
+	}}
+	res, err := Document(context.Background(), p, Options{TargetLanguage: "français", ChunkChars: 200},
+		DocMeta{}, "c1.xhtml", []byte(body.String()), "", nil)
+	if err != nil {
+		t.Fatalf("Document: %v", err)
+	}
+	if p.calls < 5 {
+		t.Fatalf("%d requêtes seulement, le test a besoin de plusieurs lots", p.calls)
+	}
+	if res.Translated != res.Segments {
+		t.Errorf("translated %d of %d segments", res.Translated, res.Segments)
+	}
+	if len(res.Notes) > maxDocRemarks {
+		t.Errorf("%d notes, la borne par document est %d", len(res.Notes), maxDocRemarks)
+	}
+	var same int
+	for _, n := range res.Notes {
+		if !n.Remark {
+			t.Errorf("note inattendue : %v", n)
+		}
+		if strings.Contains(n.Message, "toujours la même remarque") {
+			same++
+		}
+	}
+	if same != 1 {
+		t.Errorf("la même remarque figure %d fois, want 1", same)
 	}
 }

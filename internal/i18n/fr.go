@@ -100,6 +100,7 @@ var messagesFR = map[string]string{
 	"translate.note.markup-in-text":    "du balisage a été introduit dans du texte brut ; source conservée",
 	"translate.note.too-long":          "traduction %d fois plus longue que la source ; source conservée",
 	"translate.note.markup-changed":    "balisage modifié : source %v, traduction %v",
+	"translate.note.model-remark":      "remarque du modèle : %s",
 	"translate.msg.rate-limit":         "attente de %s pour rester sous %d requêtes par minute",
 	"translate.msg.salvage":            "seconde tentative sur %d passage(s)",
 	"translate.note.salvaged":          "%d passage(s) signalés sur %d récupérés à la seconde tentative",
@@ -217,6 +218,8 @@ var messagesFR = map[string]string{
 	"ui.report.failed.detail":   " — ils figurent en langue source dans le fichier produit",
 	"ui.report.notes":           "⚑ %d passage(s) signalé(s)",
 	"ui.report.notes.detail":    " — le texte source a été conservé là où la traduction n'était pas exploitable",
+	"ui.report.remarks":         "✎ %d remarque(s) du modèle",
+	"ui.report.remarks.detail":  " — rien n'a été rejeté ; ces traductions ont été conservées",
 
 	// -- internal/ui : chiffres ------------------------------------------
 	"ui.usage.no-call":              "aucun appel",
@@ -330,7 +333,8 @@ var messagesFR = map[string]string{
 	"cli.headless.requests":   "requêtes   %s",
 	"cli.headless.tokens":     "jetons     %s",
 	"cli.headless.duration":   "durée      %s",
-	"cli.headless.notes":      "signalées  %d remarque(s) sur ce livre :",
+	"cli.headless.notes":      "signalées  %d problème(s) sur ce livre :",
+	"cli.headless.remarks":    "remarques  %d du modèle, rien n'a été rejeté :",
 	"cli.headless.notes.item": "           %s",
 	"cli.headless.notes.more": "           … et %d autres",
 	"cli.headless.err.failed": "%d document(s) non traduits, le fichier produit les contient en langue source : %s",

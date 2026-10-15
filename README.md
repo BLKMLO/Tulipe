@@ -264,6 +264,26 @@ From the command line:
 tulipe translate --retry --to French --code fr my-book.epub
 ```
 
+### When the model has something to say
+
+A translator sometimes wants to tell you something rather than fail: a
+quotation left in the original on purpose, a term with no settled equivalent.
+Written into the answer itself, such a remark used to cost the whole batch —
+the reply was no longer the expected JSON, and perfectly good paragraphs went
+back to the source language.
+
+The model is now given one place for it, and told that a remark is optional:
+a `notes` field beside the translations. What arrives there is shown apart
+from the problems, because nothing was rejected.
+
+```
+✎ 2 remark(s) from the model — nothing was rejected; these translations were kept
+  ch03.xhtml : remark from the model: “Mind the gap” kept in English, it is a quotation.
+```
+
+Chapters carry the same distinction: `⚑` counts passages left in the source
+language, `✎` counts remarks. Only the first ever offers a retry.
+
 ## Telling the model what the book is about
 
 One sentence is enough to settle the register and resolve ambiguity — "bar"
